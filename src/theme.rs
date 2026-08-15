@@ -1,4 +1,4 @@
-use gpui::{App, Global, Hsla, WindowAppearance, hsla, rgb, transparent_black};
+use gpui::{App, Global, Hsla, WindowAppearance, hsla, rgb};
 use serde::{Deserialize, Serialize};
 
 /// The user's theme choice: follow the OS, or force light/dark.
@@ -102,11 +102,7 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             is_dark: true,
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0x181818).into()
-            },
+            sidebar: rgb(0x181818).into(),
             sidebar_drag_background: rgb(0x181818).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
             surface: rgb(0x1A1A1A).into(),
@@ -130,11 +126,7 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             is_dark: false,
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0xF3F3F3).into()
-            },
+            sidebar: rgb(0xF3F3F3).into(),
             sidebar_drag_background: rgb(0xF3F3F3).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
             surface: rgb(0xF6F5F6).into(),
@@ -153,5 +145,28 @@ impl Theme {
             danger: rgb(0xC64A42).into(),
             success: rgb(0x2F8F52).into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sidebar must always paint an explicit theme color. On macOS it used
+    /// to be transparent, so the window's blur material (which renders dark in
+    /// light mode) showed through as a black strip after switching themes.
+    #[test]
+    fn sidebar_is_opaque_in_both_themes() {
+        for theme in [Theme::dark(), Theme::light()] {
+            assert_eq!(theme.sidebar.a, 1.0, "sidebar must be opaque");
+            assert_eq!(theme.sidebar_drag_background.a, 1.0);
+        }
+    }
+
+    #[test]
+    fn palettes_are_mutually_dark_and_light() {
+        assert!(Theme::dark().is_dark);
+        assert!(!Theme::light().is_dark);
+        assert_ne!(Theme::dark().sidebar, Theme::light().sidebar);
     }
 }

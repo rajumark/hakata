@@ -563,10 +563,8 @@ impl Hakata {
             .child("Hakata")
     }
 
-    // ── Device selector ──────────────────────────────────────────────────
+    // ── Dropdowns ────────────────────────────────────────────────────────
 
-    /// A waku-style dropdown anchored under a button at the top of the
-    /// sidebar: shows the currently selected adb device and lets the user
     /// The dropdown chrome shared by every menu on the page: a focusable
     /// trigger that records its bounds and toggles the menu. Returns the
     /// element with its children attached by the caller.
