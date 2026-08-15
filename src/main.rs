@@ -6,6 +6,7 @@ use gpui::{
 mod adb;
 mod app;
 mod assets;
+mod settings;
 mod theme;
 
 use app::Hakata;
@@ -16,10 +17,12 @@ const APP_ID: &str = "sh.hakata";
 actions!(hakata, [Quit, CloseWindow, ToggleSidebar]);
 
 fn main() {
+    let theme_preference = settings::load().theme;
     gpui_platform::application()
         .with_assets(crate::assets::Assets)
-        .run(|cx: &mut App| {
+        .run(move |cx: &mut App| {
             cx.set_app_identity(APP_ID, APP_NAME);
+            theme::set_theme_preference(theme_preference, cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
 
             cx.bind_keys([

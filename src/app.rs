@@ -1,13 +1,16 @@
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, ClipboardItem, Context, DefiniteLength, Div, Entity,
-    FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Stateful,
-    Styled, Svg, Window, div, prelude::*, px,
+    Anchor, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context,
+    DefiniteLength, Div, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Point, Render, SharedString, Stateful, Styled, Svg, Window, anchored, canvas, deferred, div,
+    prelude::*, px,
 };
 
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemePreference};
 
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
@@ -73,6 +76,9 @@ enum AdbBootstrapState {
     Done,
 }
 
+/// How often the connected-device list is refreshed.
+const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+
 pub struct Hakata {
     selected_page: MenuPage,
     sidebar_visible: bool,
@@ -82,6 +88,17 @@ pub struct Hakata {
     toggle_focus: FocusHandle,
     adb_version: Option<AdbVersionStatus>,
     adb_bootstrap: Option<AdbBootstrapState>,
+    device_refresh_started: bool,
+    devices: Vec<crate::adb::AdbDevice>,
+    selected_device: Option<SharedString>,
+    device_menu_open: bool,
+    device_trigger_focus: FocusHandle,
+    device_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    theme_preference: ThemePreference,
+    theme_menu_open: bool,
+    theme_trigger_focus: FocusHandle,
+    theme_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    appearance_observed: bool,
 }
 
 impl Hakata {
@@ -95,6 +112,17 @@ impl Hakata {
             toggle_focus: cx.focus_handle(),
             adb_version: None,
             adb_bootstrap: None,
+            device_refresh_started: false,
+            devices: Vec::new(),
+            selected_device: None,
+            device_menu_open: false,
+            device_trigger_focus: cx.focus_handle(),
+            device_trigger_bounds: Rc::new(Cell::new(None)),
+            theme_preference: crate::theme::theme_preference(cx),
+            theme_menu_open: false,
+            theme_trigger_focus: cx.focus_handle(),
+            theme_trigger_bounds: Rc::new(Cell::new(None)),
+            appearance_observed: false,
         })
     }
 
@@ -103,8 +131,12 @@ impl Hakata {
             return 0.0;
         }
         let viewport_width = f32::from(window.viewport_size().width);
-        self.sidebar_width
-            .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH.min(viewport_width - MAIN_PANEL_MIN_WIDTH).max(SIDEBAR_MIN_WIDTH))
+        self.sidebar_width.clamp(
+            SIDEBAR_MIN_WIDTH,
+            SIDEBAR_MAX_WIDTH
+                .min(viewport_width - MAIN_PANEL_MIN_WIDTH)
+                .max(SIDEBAR_MIN_WIDTH),
+        )
     }
 
     fn select_page(&mut self, page: MenuPage, cx: &mut Context<Self>) {
@@ -135,15 +167,17 @@ impl Hakata {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { std::process::Command::new(&adb_path).arg("version").output() })
+                .spawn(async move {
+                    std::process::Command::new(&adb_path)
+                        .arg("version")
+                        .output()
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.adb_version = Some(match result {
-                    Ok(output) if output.status.success() => {
-                        AdbVersionStatus::Version(
-                            String::from_utf8_lossy(&output.stdout).trim().to_string(),
-                        )
-                    }
+                    Ok(output) if output.status.success() => AdbVersionStatus::Version(
+                        String::from_utf8_lossy(&output.stdout).trim().to_string(),
+                    ),
                     Ok(output) => AdbVersionStatus::Error(
                         String::from_utf8_lossy(&output.stderr).trim().to_string(),
                     ),
@@ -206,6 +240,104 @@ impl Hakata {
     fn retry_adb_bootstrap(&mut self, cx: &mut Context<Self>) {
         self.adb_bootstrap = None;
         self.start_adb_bootstrap(cx);
+    }
+
+    // ── Connected devices ────────────────────────────────────────────────
+
+    /// Keep the device list fresh: `adb devices` on the background executor
+    /// every [`DEVICE_REFRESH_INTERVAL`]. Never touches the UI thread.
+    fn start_device_refresh(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                let adb_path = crate::adb::adb_path();
+                let output = crate::adb::is_installed().then(|| {
+                    cx.background_executor().spawn(async move {
+                        std::process::Command::new(&adb_path)
+                            .arg("devices")
+                            .output()
+                    })
+                });
+                let devices = match output {
+                    Some(task) => task
+                        .await
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| {
+                            crate::adb::parse_adb_devices(&String::from_utf8_lossy(&output.stdout))
+                        })
+                        .unwrap_or_default(),
+                    None => Vec::new(),
+                };
+                if this
+                    .update(cx, |this, cx| this.set_devices(devices, cx))
+                    .is_err()
+                {
+                    return;
+                }
+                cx.background_executor()
+                    .timer(DEVICE_REFRESH_INTERVAL)
+                    .await;
+            }
+        })
+        .detach();
+    }
+
+    /// Replace the device list, keeping the current selection while it is
+    /// still attached and ready, otherwise auto-selecting the first ready
+    /// device so there is always one default when devices exist.
+    fn set_devices(&mut self, devices: Vec<crate::adb::AdbDevice>, cx: &mut Context<Self>) {
+        let ready: Vec<&str> = devices
+            .iter()
+            .filter(|device| device.state == "device")
+            .map(|device| device.serial.as_str())
+            .collect();
+        let next = crate::adb::resolve_default_device(self.selected_device.as_deref(), &ready);
+        self.selected_device = next.map(SharedString::from);
+        self.devices = devices;
+        cx.notify();
+    }
+
+    fn toggle_device_menu(&mut self, cx: &mut Context<Self>) {
+        self.device_menu_open = !self.device_menu_open;
+        cx.notify();
+    }
+
+    fn close_device_menu(&mut self, cx: &mut Context<Self>) {
+        if self.device_menu_open {
+            self.device_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    fn select_device(&mut self, serial: &str, cx: &mut Context<Self>) {
+        self.selected_device = Some(SharedString::from(serial));
+        self.device_menu_open = false;
+        cx.notify();
+    }
+
+    // ── Theme preference ─────────────────────────────────────────────────
+
+    fn toggle_theme_menu(&mut self, cx: &mut Context<Self>) {
+        self.theme_menu_open = !self.theme_menu_open;
+        cx.notify();
+    }
+
+    fn close_theme_menu(&mut self, cx: &mut Context<Self>) {
+        if self.theme_menu_open {
+            self.theme_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    fn set_theme_preference(&mut self, preference: ThemePreference, cx: &mut Context<Self>) {
+        if self.theme_preference == preference {
+            return;
+        }
+        self.theme_preference = preference;
+        crate::theme::set_theme_preference(preference, cx);
+        let _ = crate::settings::save(&crate::settings::Settings { theme: preference });
+        self.theme_menu_open = false;
+        cx.notify();
     }
 
     pub fn set_sidebar_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
@@ -340,7 +472,12 @@ impl Hakata {
                     .items_center()
                     .gap(px(2.0))
                     .child(self.history_button("navigate-back", "icons/arrow-left.svg", false, cx))
-                    .child(self.history_button("navigate-forward", "icons/arrow-right.svg", false, cx)),
+                    .child(self.history_button(
+                        "navigate-forward",
+                        "icons/arrow-right.svg",
+                        false,
+                        cx,
+                    )),
             )
             .child(self.window_drag_region(
                 div().id("sidebar-titlebar-drag-region").h_full().flex_1(),
@@ -351,7 +488,10 @@ impl Hakata {
     fn menu_action_row(&self, page: MenuPage, cx: &mut Context<Self>) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let selected = self.selected_page == page;
-        let id = SharedString::from(format!("sidebar-menu-{}", page.label().to_ascii_lowercase()));
+        let id = SharedString::from(format!(
+            "sidebar-menu-{}",
+            page.label().to_ascii_lowercase()
+        ));
         div()
             .id(id)
             .tab_index(0)
@@ -365,7 +505,9 @@ impl Hakata {
             .gap(px(10.0))
             .cursor_default()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .when(selected, |element| element.bg(theme.sidebar_item_background))
+            .when(selected, |element| {
+                element.bg(theme.sidebar_item_background)
+            })
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.overlay_strong))
             .child(
@@ -419,6 +561,247 @@ impl Hakata {
             .text_size(px(11.0))
             .text_color(theme.text_ghost)
             .child("Hakata")
+    }
+
+    // ── Device selector ──────────────────────────────────────────────────
+
+    /// A waku-style dropdown anchored under a button at the top of the
+    /// sidebar: shows the currently selected adb device and lets the user
+    /// The dropdown chrome shared by every menu on the page: a focusable
+    /// trigger that records its bounds and toggles the menu. Returns the
+    /// element with its children attached by the caller.
+    fn render_trigger(
+        &self,
+        cx: &mut Context<Self>,
+        id: &'static str,
+        focus: &FocusHandle,
+        bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+        toggle: fn(&mut Self, &mut Context<Self>),
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let bounds_ref = bounds.clone();
+        div()
+            .id(id)
+            .relative()
+            .track_focus(focus)
+            .tab_index(0)
+            .w_full()
+            .h(px(30.0))
+            .px(px(8.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.raised)
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_default()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(
+                canvas(
+                    move |probe: Bounds<Pixels>, _, _| bounds_ref.set(Some(probe)),
+                    |_, _, _, _| (),
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, _, cx| {
+                    toggle(this, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    toggle(this, cx);
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
+    /// The dropdown popover: a deferred card anchored just below the trigger,
+    /// closed by a mouse-down anywhere outside of it (or on the trigger).
+    #[allow(clippy::too_many_arguments)]
+    fn render_dropdown_card(
+        &self,
+        cx: &mut Context<Self>,
+        id: &'static str,
+        trigger_bounds: Bounds<Pixels>,
+        bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+        close: fn(&mut Self, &mut Context<Self>),
+        width: f32,
+        body: impl Fn(&Theme, &mut Context<Self>) -> Div,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let card = div()
+            .id(id)
+            .occlude()
+            .w(px(width))
+            .py(px(4.0))
+            .rounded(px(9.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.raised)
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .on_mouse_down_out(cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                let on_trigger = bounds
+                    .get()
+                    .is_some_and(|bounds| bounds.contains(&event.position))
+                    && event.button == MouseButton::Left;
+                if !on_trigger {
+                    close(this, cx);
+                }
+            }))
+            .child(body(&theme, cx));
+        deferred(
+            anchored()
+                .anchor(Anchor::TopLeft)
+                .position(Point::new(
+                    trigger_bounds.left(),
+                    trigger_bounds.bottom() + px(4.0),
+                ))
+                .child(card),
+        )
+        .with_priority(4)
+        .into_any_element()
+    }
+
+    /// The sidebar's device picker. Shows the selected device (or a hint to
+    /// switch the default). Refreshed every few seconds from `adb devices`.
+    fn render_device_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let has_selection = self.selected_device.is_some();
+        let label = self
+            .selected_device
+            .clone()
+            .unwrap_or_else(|| SharedString::from("No device"));
+        let label_color = if has_selection {
+            theme.text
+        } else {
+            theme.text_tertiary
+        };
+
+        let trigger = self
+            .render_trigger(
+                cx,
+                "device-selector-trigger",
+                &self.device_trigger_focus,
+                self.device_trigger_bounds.clone(),
+                Self::toggle_device_menu,
+            )
+            .child(icon("icons/smartphone.svg", 13.0, label_color))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(11.0))
+                    .text_color(label_color)
+                    .child(label),
+            )
+            .child(
+                icon("icons/chevron-down.svg", 12.0, theme.text_tertiary).when(
+                    self.device_menu_open,
+                    |icon| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                            0.5,
+                        )))
+                    },
+                ),
+            );
+
+        let Some(trigger_bounds) = self.device_trigger_bounds.get() else {
+            return trigger.into_any_element();
+        };
+        if !self.device_menu_open {
+            return trigger.into_any_element();
+        }
+
+        let surface = self.render_dropdown_card(
+            cx,
+            "device-selector-card",
+            trigger_bounds,
+            self.device_trigger_bounds.clone(),
+            Self::close_device_menu,
+            232.0,
+            |theme, cx| {
+                if self.devices.is_empty() {
+                    return div()
+                        .mx(px(4.0))
+                        .px(px(8.0))
+                        .min_h(px(26.0))
+                        .rounded(px(6.0))
+                        .flex()
+                        .items_center()
+                        .text_size(px(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(SharedString::from("No devices"));
+                }
+                let mut card = div();
+                for device in &self.devices {
+                    let serial = device.serial.clone();
+                    let ready = device.state == "device";
+                    let selected = self.selected_device.as_deref() == Some(serial.as_str());
+                    let row_color = if !ready {
+                        theme.text_ghost
+                    } else if selected {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    };
+                    let row = div()
+                        .id(SharedString::from(format!("device-menu-{}", serial)))
+                        .mx(px(4.0))
+                        .px(px(8.0))
+                        .min_h(px(26.0))
+                        .rounded(px(6.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .cursor_default()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(11.5))
+                                .text_color(row_color)
+                                .child(SharedString::from(serial.clone())),
+                        )
+                        .when(selected, |element| {
+                            element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                        })
+                        .when(!ready, |element| {
+                            element.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(px(10.0))
+                                    .text_color(theme.text_ghost)
+                                    .child(SharedString::from(device.state.clone())),
+                            )
+                        })
+                        .when(ready, |element| {
+                            element
+                                .hover(|element| element.bg(theme.overlay))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener({
+                                        let serial = serial.clone();
+                                        move |this, _, _, cx| this.select_device(&serial, cx)
+                                    }),
+                                )
+                        });
+                    card = card.child(row);
+                }
+                card
+            },
+        );
+        trigger.child(surface).into_any_element()
     }
 
     fn render_sidebar(&self, width: f32, cx: &mut Context<Self>) -> Div {
@@ -534,6 +917,14 @@ impl Hakata {
                 div()
                     .flex_none()
                     .px(px(10.0))
+                    .pt(px(10.0))
+                    .pb(px(8.0))
+                    .child(self.render_device_selector(cx)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(10.0))
                     .children(MenuPage::ALL.iter().map(|page| {
                         div()
                             .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
@@ -639,6 +1030,7 @@ impl Hakata {
     fn render_page(&self, cx: &mut Context<Self>) -> AnyElement {
         match self.selected_page {
             MenuPage::Debug => self.render_debug_page(cx),
+            MenuPage::Settings => self.render_settings_page(cx),
             page => {
                 let theme = Theme::current(cx);
                 div()
@@ -654,14 +1046,149 @@ impl Hakata {
                             .text_size(px(14.0))
                             .text_color(theme.text_secondary)
                             .child(icon(page.icon(), 16.0, theme.text_ghost))
-                            .child(SharedString::from(format!(
-                                "{} coming soon",
-                                page.label()
-                            ))),
+                            .child(SharedString::from(format!("{} coming soon", page.label()))),
                     )
                     .into_any_element()
             }
         }
+    }
+
+    fn render_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .px(px(24.0))
+            .pt(px(24.0))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(480.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(10.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from("APPEARANCE")),
+                    )
+                    .child(
+                        div()
+                            .p(px(6.0))
+                            .rounded(px(10.0))
+                            .bg(theme.raised)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child(self.render_theme_selector(cx)),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// The appearance dropdown on the Settings page.
+    fn render_theme_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let trigger = self
+            .render_trigger(
+                cx,
+                "theme-selector-trigger",
+                &self.theme_trigger_focus,
+                self.theme_trigger_bounds.clone(),
+                Self::toggle_theme_menu,
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(11.0))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from("Theme")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(11.0))
+                    .text_color(theme.text)
+                    .child(SharedString::from(self.theme_preference.label())),
+            )
+            .child(
+                icon("icons/chevron-down.svg", 12.0, theme.text_tertiary).when(
+                    self.theme_menu_open,
+                    |icon| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                            0.5,
+                        )))
+                    },
+                ),
+            );
+
+        let Some(trigger_bounds) = self.theme_trigger_bounds.get() else {
+            return trigger.into_any_element();
+        };
+        if !self.theme_menu_open {
+            return trigger.into_any_element();
+        }
+
+        let surface = self.render_dropdown_card(
+            cx,
+            "theme-selector-card",
+            trigger_bounds,
+            self.theme_trigger_bounds.clone(),
+            Self::close_theme_menu,
+            200.0,
+            |theme, cx| {
+                let mut card = div();
+                for preference in ThemePreference::ALL {
+                    let selected = self.theme_preference == preference;
+                    card = card.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "theme-menu-{}",
+                                preference.label().to_ascii_lowercase()
+                            )))
+                            .mx(px(4.0))
+                            .px(px(8.0))
+                            .min_h(px(26.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .cursor_default()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(11.5))
+                                    .text_color(if selected {
+                                        theme.text
+                                    } else {
+                                        theme.text_secondary
+                                    })
+                                    .child(SharedString::from(preference.label())),
+                            )
+                            .when(selected, |element| {
+                                element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                            })
+                            .hover(|element| element.bg(theme.overlay))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_theme_preference(preference, cx)
+                                }),
+                            ),
+                    );
+                }
+                card
+            },
+        );
+        trigger.child(surface).into_any_element()
     }
 
     fn render_debug_page(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -757,6 +1284,23 @@ impl Hakata {
                 .into_any_element(),
         };
 
+        let device_value: AnyElement = match &self.selected_device {
+            Some(serial) => div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(10.5))
+                .text_color(theme.text_secondary)
+                .child(icon("icons/smartphone.svg", 12.0, theme.text_secondary))
+                .child(SharedString::from(serial.clone()))
+                .into_any_element(),
+            None => div()
+                .text_size(px(10.5))
+                .text_color(theme.text_ghost)
+                .child(SharedString::from("No device"))
+                .into_any_element(),
+        };
+
         let card = div()
             .mt(px(15.0))
             .w_full()
@@ -769,7 +1313,8 @@ impl Hakata {
                 path_value.into_any_element(),
                 false,
             ))
-            .child(debug_info_row(&theme, "adb version", version_value, true));
+            .child(debug_info_row(&theme, "adb version", version_value, false))
+            .child(debug_info_row(&theme, "device", device_value, true));
 
         div()
             .id("debug-page-scroll")
@@ -928,7 +1473,9 @@ fn debug_info_row(theme: &Theme, label: &str, value: AnyElement, last: bool) -> 
     div()
         .px(px(20.0))
         .py(px(14.0))
-        .when(!last, |element| element.border_b_1().border_color(theme.border))
+        .when(!last, |element| {
+            element.border_b_1().border_color(theme.border)
+        })
         .flex()
         .items_center()
         .gap(px(12.0))
@@ -957,6 +1504,17 @@ impl Render for Hakata {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.adb_bootstrap.is_none() && !crate::adb::is_installed() {
             self.start_adb_bootstrap(cx);
+        }
+        if !self.device_refresh_started {
+            self.device_refresh_started = true;
+            self.start_device_refresh(cx);
+        }
+        if !self.appearance_observed {
+            self.appearance_observed = true;
+            cx.observe_window_appearance(window, |_, window, _| {
+                window.refresh();
+            })
+            .detach();
         }
         let theme = Theme::current(cx);
         let sidebar_width = self.effective_sidebar_width(window);

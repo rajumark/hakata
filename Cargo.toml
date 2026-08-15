@@ -7,6 +7,8 @@ description = "A tiny GPUI desktop app with a single centered button"
 [dependencies]
 anyhow = "1.0"
 dirs = "6.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 smol = "2"
 ureq = "2"
 zip = "2"

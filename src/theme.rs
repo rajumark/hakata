@@ -1,4 +1,68 @@
-use gpui::{App, Hsla, WindowAppearance, hsla, rgb, transparent_black};
+use gpui::{App, Global, Hsla, WindowAppearance, hsla, rgb, transparent_black};
+use serde::{Deserialize, Serialize};
+
+/// The user's theme choice: follow the OS, or force light/dark.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreference {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemePreference {
+    pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+        }
+    }
+
+    fn resolves_to_dark(self, system_appearance: WindowAppearance) -> bool {
+        match self {
+            Self::System => matches!(
+                system_appearance,
+                WindowAppearance::Dark | WindowAppearance::VibrantDark
+            ),
+            Self::Light => false,
+            Self::Dark => true,
+        }
+    }
+
+    fn native_override(self) -> Option<WindowAppearance> {
+        match self {
+            Self::System => None,
+            Self::Light => Some(WindowAppearance::Light),
+            Self::Dark => Some(WindowAppearance::Dark),
+        }
+    }
+}
+
+/// The active preference, published globally so every view resolves the same
+/// palette while the window's native appearance is what it is.
+#[derive(Clone, Copy)]
+struct ActiveThemePreference(ThemePreference);
+
+impl Global for ActiveThemePreference {}
+
+/// The current preference, defaulting to following the system.
+pub fn theme_preference(cx: &App) -> ThemePreference {
+    cx.try_global::<ActiveThemePreference>()
+        .map(|active| active.0)
+        .unwrap_or_default()
+}
+
+/// Publish a new preference and push it onto the native window appearance.
+/// The palette is resolved lazily per frame, so a subsequent `cx.notify()`
+/// repaints the app in the new theme.
+pub fn set_theme_preference(preference: ThemePreference, cx: &mut App) {
+    cx.set_global(ActiveThemePreference(preference));
+    cx.set_window_appearance(preference.native_override());
+}
 
 /// Neutral graphite surfaces in the spirit of the learning project (Waku):
 /// color is reserved for meaning.
@@ -27,9 +91,11 @@ pub struct Theme {
 
 impl Theme {
     pub fn current(cx: &App) -> Self {
-        match cx.window_appearance() {
-            WindowAppearance::Dark | WindowAppearance::VibrantDark => Self::dark(),
-            _ => Self::light(),
+        let preference = theme_preference(cx);
+        if preference.resolves_to_dark(cx.window_appearance()) {
+            Self::dark()
+        } else {
+            Self::light()
         }
     }
 

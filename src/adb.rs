@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::path::{PathBuf, Component};
+use std::path::{Component, PathBuf};
 
 const DOWNLOAD_BASE: &str = "https://raw.githubusercontent.com/rajumark/adbcontent/main/";
 
@@ -31,6 +31,48 @@ pub fn adb_path() -> PathBuf {
 
 pub fn is_installed() -> bool {
     adb_path().is_file()
+}
+
+/// One row of `adb devices` output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdbDevice {
+    pub serial: String,
+    pub state: String,
+}
+
+/// Parse `adb devices` output into attached devices.
+///
+/// Tolerates the header, blank lines, and daemon-startup chatter; only
+/// lines of `serial<TAB>state` form are kept.
+pub fn parse_adb_devices(output: &str) -> Vec<AdbDevice> {
+    let mut devices = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line == "List of devices attached" || line.starts_with('*') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let (Some(serial), Some(state)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        devices.push(AdbDevice {
+            serial: serial.to_string(),
+            state: state.to_string(),
+        });
+    }
+    devices
+}
+
+/// Pick the default device after a refresh: keep the current selection while
+/// it is still attached and ready, otherwise fall back to the first ready
+/// device, otherwise none.
+pub fn resolve_default_device(current: Option<&str>, ready: &[&str]) -> Option<String> {
+    if let Some(current) = current {
+        if ready.contains(&current) {
+            return Some(current.to_string());
+        }
+    }
+    ready.first().map(|serial| (*serial).to_string())
 }
 
 fn platform_zip_name() -> &'static str {
@@ -125,4 +167,87 @@ pub fn download_and_install(mut progress: impl FnMut(f32) + Send + 'static) -> a
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_ready_devices() {
+        let devices =
+            parse_adb_devices("List of devices attached\nemulator-5554\tdevice\nR58M123\tdevice\n");
+        assert_eq!(
+            devices,
+            vec![
+                AdbDevice {
+                    serial: "emulator-5554".into(),
+                    state: "device".into(),
+                },
+                AdbDevice {
+                    serial: "R58M123".into(),
+                    state: "device".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_list_is_empty() {
+        assert!(parse_adb_devices("List of devices attached\n\n").is_empty());
+        assert!(parse_adb_devices("").is_empty());
+    }
+
+    #[test]
+    fn skips_daemon_startup_chatter() {
+        let output = "* daemon not running; starting now at tcp:5037\n\
+            * daemon started successfully\n\
+            List of devices attached\n\
+            emulator-5554\tdevice\n";
+        let devices = parse_adb_devices(output);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].serial, "emulator-5554");
+    }
+
+    #[test]
+    fn keeps_unready_states() {
+        let devices =
+            parse_adb_devices("List of devices attached\nXYZ\tunauthorized\nABC\toffline\n");
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0].state, "unauthorized");
+        assert_eq!(devices[1].state, "offline");
+    }
+
+    #[test]
+    fn default_device_picks_first_ready_when_none_selected() {
+        let ready = ["emulator-5554", "emulator-5556"];
+        assert_eq!(
+            resolve_default_device(None, &ready),
+            Some("emulator-5554".to_string())
+        );
+    }
+
+    #[test]
+    fn default_device_keeps_current_selection() {
+        let ready = ["emulator-5554", "emulator-5556"];
+        assert_eq!(
+            resolve_default_device(Some("emulator-5556"), &ready),
+            Some("emulator-5556".to_string())
+        );
+    }
+
+    #[test]
+    fn default_device_falls_back_when_selection_removed() {
+        let ready = ["emulator-5556"];
+        assert_eq!(
+            resolve_default_device(Some("emulator-5554"), &ready),
+            Some("emulator-5556".to_string())
+        );
+    }
+
+    #[test]
+    fn default_device_is_none_without_ready_devices() {
+        assert_eq!(resolve_default_device(Some("emulator-5554"), &[]), None);
+        assert_eq!(resolve_default_device(None, &[]), None);
+    }
 }

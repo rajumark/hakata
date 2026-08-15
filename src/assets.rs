@@ -18,12 +18,14 @@ const ICONS: &[(&str, &[u8])] = icons![
     "arrow-left",
     "arrow-right",
     "check",
+    "chevron-down",
     "compose",
     "copy",
     "loader-circle",
     "panel-left",
     "search",
     "settings",
+    "smartphone",
     "terminal-square",
 ];
 
