@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use gpui::{
-    App, Context, Div, Entity, FocusHandle, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString,
-    Stateful, Styled, Svg, Window, div, prelude::*, px,
+    Animation, AnimationExt, AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle,
+    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Stateful, Styled, Svg,
+    Window, div, prelude::*, px,
 };
 
 use crate::theme::Theme;
@@ -25,16 +28,18 @@ pub enum MenuPage {
     NewTask,
     Search,
     Settings,
+    Debug,
 }
 
 impl MenuPage {
-    const ALL: [Self; 3] = [Self::NewTask, Self::Search, Self::Settings];
+    const ALL: [Self; 4] = [Self::NewTask, Self::Search, Self::Settings, Self::Debug];
 
     fn label(self) -> &'static str {
         match self {
             Self::NewTask => "New Task",
             Self::Search => "Search",
             Self::Settings => "Settings",
+            Self::Debug => "Debug",
         }
     }
 
@@ -43,6 +48,7 @@ impl MenuPage {
             Self::NewTask => "icons/compose.svg",
             Self::Search => "icons/search.svg",
             Self::Settings => "icons/settings.svg",
+            Self::Debug => "icons/terminal-square.svg",
         }
     }
 }
@@ -53,6 +59,13 @@ struct PanelResizeDrag {
     start_width: f32,
 }
 
+/// The adb version probe run when the Debug page is opened.
+enum AdbVersionStatus {
+    Checking,
+    Version(String),
+    Error(String),
+}
+
 pub struct Hakata {
     selected_page: MenuPage,
     sidebar_visible: bool,
@@ -60,6 +73,7 @@ pub struct Hakata {
     panel_resize_drag: Option<PanelResizeDrag>,
     header_drag_armed: bool,
     toggle_focus: FocusHandle,
+    adb_version: Option<AdbVersionStatus>,
 }
 
 impl Hakata {
@@ -71,6 +85,7 @@ impl Hakata {
             panel_resize_drag: None,
             header_drag_armed: false,
             toggle_focus: cx.focus_handle(),
+            adb_version: None,
         })
     }
 
@@ -85,7 +100,50 @@ impl Hakata {
 
     fn select_page(&mut self, page: MenuPage, cx: &mut Context<Self>) {
         self.selected_page = page;
+        if page == MenuPage::Debug {
+            self.check_adb_version(cx);
+        }
         cx.notify();
+    }
+
+    /// Probe `adb version` on the background executor the first time the Debug
+    /// page is shown. Rendering only ever reads the cached status.
+    fn check_adb_version(&mut self, cx: &mut Context<Self>) {
+        if self.adb_version.is_some() {
+            return;
+        }
+        let adb_path = crate::adb::adb_path();
+        if !crate::adb::is_installed() {
+            self.adb_version = Some(AdbVersionStatus::Error(format!(
+                "adb not found at {}",
+                adb_path.display()
+            )));
+            cx.notify();
+            return;
+        }
+        self.adb_version = Some(AdbVersionStatus::Checking);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { std::process::Command::new(&adb_path).arg("version").output() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.adb_version = Some(match result {
+                    Ok(output) if output.status.success() => {
+                        AdbVersionStatus::Version(
+                            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+                        )
+                    }
+                    Ok(output) => AdbVersionStatus::Error(
+                        String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                    ),
+                    Err(error) => AdbVersionStatus::Error(error.to_string()),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn set_sidebar_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
@@ -516,18 +574,184 @@ impl Hakata {
 
     // ── Pages ─────────────────────────────────────────────────────────────
 
-    fn render_page(&self, cx: &mut Context<Self>) -> Div {
+    fn render_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        match self.selected_page {
+            MenuPage::Debug => self.render_debug_page(cx),
+            page => {
+                let theme = Theme::current(cx);
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .text_size(px(14.0))
+                            .text_color(theme.text_secondary)
+                            .child(icon(page.icon(), 16.0, theme.text_ghost))
+                            .child(SharedString::from(format!(
+                                "{} coming soon",
+                                page.label()
+                            ))),
+                    )
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn render_debug_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let page = self.selected_page;
-        div()
+        let adb_path = crate::adb::adb_path();
+        let adb_path_text = adb_path.display().to_string();
+
+        let copy_button = div()
+            .id("debug-copy-adb-path")
+            .tab_index(0)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .h(px(26.0))
+            .px(px(10.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(px(10.5))
+            .text_color(theme.text_secondary)
+            .hover(|element| element.bg(theme.overlay))
+            .child(icon("icons/copy.svg", 11.0, theme.text_tertiary))
+            .child(SharedString::from("Copy"))
+            .on_click(cx.listener({
+                let path = adb_path_text.clone();
+                move |_, _, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+                    cx.notify();
+                }
+            }));
+
+        let path_value = div()
+            .min_w_0()
+            .flex_1()
             .flex()
             .items_center()
-            .gap(px(10.0))
-            .text_size(px(14.0))
-            .text_color(theme.text_secondary)
-            .child(icon(page.icon(), 16.0, theme.text_ghost))
-            .child(SharedString::from(format!("{} coming soon", page.label())))
+            .gap(px(8.0))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(10.5))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(adb_path_text.clone())),
+            )
+            .child(copy_button);
+
+        let version_value: AnyElement = match &self.adb_version {
+            None => div()
+                .text_size(px(10.5))
+                .text_color(theme.text_ghost)
+                .child(SharedString::from("Not checked"))
+                .into_any_element(),
+            Some(AdbVersionStatus::Checking) => div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(10.5))
+                .text_color(theme.text_tertiary)
+                .child(
+                    icon("icons/loader-circle.svg", 12.0, theme.text_tertiary)
+                        .with_animation(
+                            SharedString::from("debug-version-spinner"),
+                            Animation::new(Duration::from_millis(900))
+                                .repeat()
+                                .with_easing(gpui::linear),
+                            |icon, delta| {
+                                icon.with_transformation(gpui::Transformation::rotate(
+                                    gpui::percentage(delta),
+                                ))
+                            },
+                        )
+                        .into_any_element(),
+                )
+                .child(SharedString::from("Checking…"))
+                .into_any_element(),
+            Some(AdbVersionStatus::Version(version)) => div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(10.5))
+                .text_color(theme.success)
+                .child(icon("icons/check.svg", 11.0, theme.success))
+                .child(SharedString::from(version.clone()))
+                .into_any_element(),
+            Some(AdbVersionStatus::Error(error)) => div()
+                .text_size(px(10.5))
+                .text_color(theme.danger)
+                .child(SharedString::from(error.clone()))
+                .into_any_element(),
+        };
+
+        let card = div()
+            .mt(px(15.0))
+            .w_full()
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .overflow_hidden()
+            .child(debug_info_row(
+                &theme,
+                "adb path",
+                path_value.into_any_element(),
+                false,
+            ))
+            .child(debug_info_row(&theme, "adb version", version_value, true));
+
+        div()
+            .id("debug-page-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .px(px(32.0))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(760.0))
+                    .mx_auto()
+                    .child(
+                        div()
+                            .pt(px(2.0))
+                            .flex_none()
+                            .text_size(px(18.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(SharedString::from("Debug")),
+                    )
+                    .child(card),
+            )
+            .into_any_element()
     }
+}
+
+/// A waku-settings-style label/value row inside a raised card.
+fn debug_info_row(theme: &Theme, label: &str, value: AnyElement, last: bool) -> Div {
+    div()
+        .px(px(20.0))
+        .py(px(14.0))
+        .when(!last, |element| element.border_b_1().border_color(theme.border))
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .child(
+            div()
+                .w(px(84.0))
+                .flex_none()
+                .text_size(px(10.5))
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(label)),
+        )
+        .child(div().flex_1().min_w_0().child(value))
 }
 
 /// A monochrome icon from the embedded set, tinted via text color.
@@ -575,9 +799,7 @@ impl Render for Hakata {
                         div()
                             .flex_1()
                             .min_h_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
+                            .relative()
                             .child(self.render_page(cx)),
                     )
                     .when(self.sidebar_visible, |element| {

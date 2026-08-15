@@ -17,10 +17,14 @@ macro_rules! icons {
 const ICONS: &[(&str, &[u8])] = icons![
     "arrow-left",
     "arrow-right",
+    "check",
     "compose",
+    "copy",
+    "loader-circle",
     "panel-left",
     "search",
     "settings",
+    "terminal-square",
 ];
 
 impl AssetSource for Assets {

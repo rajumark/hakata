@@ -3,6 +3,7 @@ use gpui::{
     WindowOptions, actions, point, px, size,
 };
 
+mod adb;
 mod app;
 mod assets;
 mod theme;
