@@ -1,0 +1,3 @@
+[env]
+# GPUI's build script invokes `xcrun metal` for precompiled shaders.
+TOOLCHAINS = "Metal"
