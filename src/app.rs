@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, ClipboardItem, Context, Div, Entity, FocusHandle,
-    FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Stateful, Styled, Svg,
-    Window, div, prelude::*, px,
+    Animation, AnimationExt, AnyElement, App, ClipboardItem, Context, DefiniteLength, Div, Entity,
+    FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, SharedString, Stateful,
+    Styled, Svg, Window, div, prelude::*, px,
 };
 
 use crate::theme::Theme;
@@ -66,6 +66,13 @@ enum AdbVersionStatus {
     Error(String),
 }
 
+/// The launch-time adb bootstrap: download platform-tools on first run.
+enum AdbBootstrapState {
+    Downloading { progress: f32 },
+    Error(String),
+    Done,
+}
+
 pub struct Hakata {
     selected_page: MenuPage,
     sidebar_visible: bool,
@@ -74,6 +81,7 @@ pub struct Hakata {
     header_drag_armed: bool,
     toggle_focus: FocusHandle,
     adb_version: Option<AdbVersionStatus>,
+    adb_bootstrap: Option<AdbBootstrapState>,
 }
 
 impl Hakata {
@@ -86,6 +94,7 @@ impl Hakata {
             header_drag_armed: false,
             toggle_focus: cx.focus_handle(),
             adb_version: None,
+            adb_bootstrap: None,
         })
     }
 
@@ -144,6 +153,59 @@ impl Hakata {
             });
         })
         .detach();
+    }
+
+    // ── adb bootstrap ────────────────────────────────────────────────────
+
+    /// Download platform-tools on launch when adb is missing. Runs off the UI
+    /// thread; progress streams through a bounded channel into the modal.
+    fn start_adb_bootstrap(&mut self, cx: &mut Context<Self>) {
+        if self.adb_bootstrap.is_some() || crate::adb::is_installed() {
+            return;
+        }
+        self.adb_bootstrap = Some(AdbBootstrapState::Downloading { progress: 0.0 });
+        cx.notify();
+
+        let (progress_sender, progress_receiver) = smol::channel::bounded::<f32>(16);
+        cx.spawn(async move |this, cx| {
+            let task = cx.background_executor().spawn(async move {
+                crate::adb::download_and_install(move |fraction| {
+                    let _ = progress_sender.send_blocking(fraction);
+                })
+            });
+
+            while let Ok(fraction) = progress_receiver.recv().await {
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(AdbBootstrapState::Downloading { progress }) =
+                        &mut this.adb_bootstrap
+                    {
+                        *progress = fraction;
+                    }
+                    cx.notify();
+                });
+            }
+
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.adb_bootstrap = Some(match result {
+                    Ok(()) => {
+                        this.adb_version = None;
+                        if this.selected_page == MenuPage::Debug {
+                            this.check_adb_version(cx);
+                        }
+                        AdbBootstrapState::Done
+                    }
+                    Err(error) => AdbBootstrapState::Error(error.to_string()),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn retry_adb_bootstrap(&mut self, cx: &mut Context<Self>) {
+        self.adb_bootstrap = None;
+        self.start_adb_bootstrap(cx);
     }
 
     pub fn set_sidebar_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
@@ -732,6 +794,133 @@ impl Hakata {
             )
             .into_any_element()
     }
+
+    /// Non-closable overlay shown while adb is bootstrapped on first launch.
+    fn render_adb_bootstrap_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = Theme::current(cx);
+        let (title, body) = match &self.adb_bootstrap {
+            Some(AdbBootstrapState::Downloading { progress }) => {
+                let spinner = icon("icons/loader-circle.svg", 14.0, theme.text_tertiary)
+                    .with_animation(
+                        SharedString::from("adb-bootstrap-spinner"),
+                        Animation::new(Duration::from_millis(900))
+                            .repeat()
+                            .with_easing(gpui::linear),
+                        |icon, delta| {
+                            icon.with_transformation(gpui::Transformation::rotate(
+                                gpui::percentage(delta),
+                            ))
+                        },
+                    )
+                    .into_any_element();
+                let title_row = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(spinner)
+                    .child(
+                        div()
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(SharedString::from("Downloading adb")),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(format!("{:.0}%", progress * 100.0))),
+                    );
+                let bar = div()
+                    .mt(px(2.0))
+                    .h(px(8.0))
+                    .w_full()
+                    .rounded(px(4.0))
+                    .bg(theme.surface)
+                    .child(
+                        div()
+                            .h_full()
+                            .w(DefiniteLength::Fraction(*progress))
+                            .rounded(px(4.0))
+                            .bg(theme.accent),
+                    );
+                (title_row, bar)
+            }
+            Some(AdbBootstrapState::Error(error)) => {
+                let retry = div()
+                    .id("adb-bootstrap-retry")
+                    .tab_index(0)
+                    .cursor_default()
+                    .h(px(28.0))
+                    .px(px(14.0))
+                    .rounded(px(7.0))
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(11.5))
+                    .text_color(theme.text_secondary)
+                    .hover(|element| element.bg(theme.overlay))
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .on_click(cx.listener(|this, _, _, cx| this.retry_adb_bootstrap(cx)))
+                    .child(SharedString::from("Retry"));
+                (
+                    div()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(SharedString::from("Download failed")),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .w_full()
+                                .text_size(px(11.0))
+                                .line_height(px(16.0))
+                                .text_color(theme.danger)
+                                .child(SharedString::from(error.clone())),
+                        )
+                        .child(div().flex().justify_end().child(retry)),
+                )
+            }
+            _ => return None,
+        };
+
+        let scrim = if theme.is_dark {
+            gpui::hsla(0.0, 0.0, 0.0, 0.34)
+        } else {
+            gpui::hsla(0.0, 0.0, 0.0, 0.16)
+        };
+        let card = div()
+            .w(px(380.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .border_1()
+            .border_color(theme.border)
+            .px(px(24.0))
+            .py(px(20.0))
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .child(title)
+            .child(body);
+        let layer = div()
+            .id("adb-bootstrap-layer")
+            .absolute()
+            .inset_0()
+            .occlude()
+            .bg(scrim)
+            .p(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(card);
+        Some(gpui::deferred(layer).with_priority(4).into_any_element())
+    }
 }
 
 /// A waku-settings-style label/value row inside a raised card.
@@ -766,6 +955,9 @@ pub fn icon(path: &'static str, size: f32, color: gpui::Hsla) -> Svg {
 
 impl Render for Hakata {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.adb_bootstrap.is_none() && !crate::adb::is_installed() {
+            self.start_adb_bootstrap(cx);
+        }
         let theme = Theme::current(cx);
         let sidebar_width = self.effective_sidebar_width(window);
         let content = div()
@@ -807,6 +999,12 @@ impl Render for Hakata {
                     }),
             )
             .into_any_element();
-        content
+        let root = div().size_full().relative().child(content);
+        let root = if let Some(modal) = self.render_adb_bootstrap_modal(cx) {
+            root.child(modal)
+        } else {
+            root
+        };
+        root.into_any_element()
     }
 }

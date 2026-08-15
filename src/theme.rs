@@ -4,6 +4,7 @@ use gpui::{App, Hsla, WindowAppearance, hsla, rgb, transparent_black};
 /// color is reserved for meaning.
 #[derive(Clone, Copy)]
 pub struct Theme {
+    pub is_dark: bool,
     pub sidebar: Hsla,
     pub sidebar_drag_background: Hsla,
     pub sidebar_item_background: Hsla,
@@ -34,6 +35,7 @@ impl Theme {
 
     pub fn dark() -> Self {
         Self {
+            is_dark: true,
             sidebar: if cfg!(target_os = "macos") {
                 transparent_black()
             } else {
@@ -61,6 +63,7 @@ impl Theme {
 
     pub fn light() -> Self {
         Self {
+            is_dark: false,
             sidebar: if cfg!(target_os = "macos") {
                 transparent_black()
             } else {
