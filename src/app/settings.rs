@@ -30,7 +30,7 @@ impl Hakata {
                             .text_size(px(10.5))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text_tertiary)
-                            .child(SharedString::from("APPEARANCE")),
+                            .child(tr_cow!("settings.appearance")),
                     )
                     .child(
                         div()
@@ -63,14 +63,14 @@ impl Hakata {
                     .truncate()
                     .text_size(px(11.0))
                     .text_color(theme.text_secondary)
-                    .child(SharedString::from("Theme")),
+                    .child(tr_cow!("settings.theme")),
             )
             .child(
                 div()
                     .flex_none()
                     .text_size(px(11.0))
                     .text_color(theme.text)
-                    .child(SharedString::from(self.theme_preference.label())),
+                    .child(self.theme_preference.label()),
             )
             .child(
                 icon("icons/chevron-down.svg", 12.0, theme.text_tertiary).when(
@@ -126,7 +126,7 @@ impl Hakata {
                                     } else {
                                         theme.text_secondary
                                     })
-                                    .child(SharedString::from(preference.label())),
+                                    .child(preference.label()),
                             )
                             .when(selected, |element| {
                                 element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))

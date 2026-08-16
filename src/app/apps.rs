@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use gpui::{
-    actions, Animation, AnimationExt, AnyElement, App, ClipboardItem, Context,
+    actions, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context, Div,
     InteractiveElement, IntoElement, KeyBinding, KeyDownEvent, MouseButton, ObjectFit,
-    ParentElement, SharedString, Styled, Window, div, img, px, prelude::*,
+    ParentElement, Pixels, SharedString, Stateful, Styled, Window, canvas, div, img, px,
+    prelude::*,
 };
 
+use crate::adb::AppFilter;
 use crate::theme::Theme;
 
 use super::{Hakata, PanelResizeSide, PanelResizeTarget, icon, package_info};
@@ -29,12 +31,12 @@ pub(crate) enum AppsTab {
 impl AppsTab {
     pub(crate) const ALL: [Self; 4] = [Self::Overview, Self::Permissions, Self::Paths, Self::Files];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Overview => "Overview",
-            Self::Permissions => "Permissions",
-            Self::Paths => "Paths",
-            Self::Files => "Files",
+            Self::Overview => tr!("apps.tab.overview"),
+            Self::Permissions => tr!("apps.tab.permissions"),
+            Self::Paths => tr!("apps.tab.paths"),
+            Self::Files => tr!("apps.tab.files"),
         }
     }
 }
@@ -75,6 +77,7 @@ impl Hakata {
         self.packages_refresh_epoch += 1;
         let epoch = self.packages_refresh_epoch;
         let serial_for_spawn = serial.clone();
+        let filter = self.apps_filter;
         self.packages_loading = true;
         self.packages_device = Some(serial);
         cx.notify();
@@ -89,7 +92,7 @@ impl Hakata {
                         .arg("pm")
                         .arg("list")
                         .arg("packages")
-                        .arg("-3")
+                        .args(filter.adb_flag())
                         .output()
                 })
                 .await;
@@ -415,7 +418,7 @@ impl Hakata {
                         element.rounded(px(4.0)).bg(theme.overlay_strong)
                     })
                     .child(self.selected_package.clone().unwrap_or_else(|| {
-                        SharedString::from("No app selected")
+                        tr_cow!("apps.no_app_selected").into()
                     })),
             )
             .child(
@@ -531,7 +534,7 @@ impl Hakata {
                 div()
                     .text_size(px(11.0))
                     .text_color(theme.text_ghost)
-                    .child(SharedString::from("coming soon")),
+                    .child(tr_cow!("common.coming_soon")),
             )
             .into_any_element()
     }
@@ -572,7 +575,7 @@ impl Hakata {
                     div()
                         .text_size(px(11.5))
                         .text_color(theme.text_tertiary)
-                        .child(SharedString::from("Loading package info…")),
+                        .child(tr_cow!("apps.loading_package_info")),
                 )
                 .into_any_element();
         }
@@ -580,24 +583,27 @@ impl Hakata {
             return self.render_overview_center(theme.text_ghost, error.clone(), cx);
         }
         let Some(info) = self.parsed_package_info() else {
-            return self.render_overview_center(theme.text_ghost, "No package info".into(), cx);
+            return self.render_overview_center(theme.text_ghost, tr!("apps.no_package_info"), cx);
         };
 
-        let fields: Vec<(&'static str, String)> = vec![
-            ("Version name", info.version_name.unwrap_or_default()),
-            ("Version code", info.version_code.unwrap_or_default()),
-            ("Target SDK", info.target_sdk.unwrap_or_default()),
-            ("Min SDK", info.min_sdk.unwrap_or_default()),
-            ("UID", info.uid.unwrap_or_default()),
+        let fields: Vec<(String, String)> = vec![
+            (tr!("apps.version_name"), info.version_name.unwrap_or_default()),
+            (tr!("apps.version_code"), info.version_code.unwrap_or_default()),
+            (tr!("apps.target_sdk"), info.target_sdk.unwrap_or_default()),
+            (tr!("apps.min_sdk"), info.min_sdk.unwrap_or_default()),
+            (tr!("apps.uid"), info.uid.unwrap_or_default()),
             (
-                "First install",
+                tr!("apps.first_install"),
                 info.first_install_time.unwrap_or_default(),
             ),
-            ("Last update", info.last_update_time.unwrap_or_default()),
-            ("Data dir", info.data_dir.unwrap_or_default()),
-            ("Code path", info.code_path.unwrap_or_default()),
             (
-                "Flags",
+                tr!("apps.last_update"),
+                info.last_update_time.unwrap_or_default(),
+            ),
+            (tr!("apps.data_dir"), info.data_dir.unwrap_or_default()),
+            (tr!("apps.code_path"), info.code_path.unwrap_or_default()),
+            (
+                tr!("apps.flags"),
                 if info.flags.is_empty() {
                     String::new()
                 } else {
@@ -705,7 +711,7 @@ impl Hakata {
                 }
             }));
 
-        let mut shell = div()
+        let shell = div()
             .id("apps-search")
             .h(px(28.0))
             .flex_none()
@@ -724,53 +730,141 @@ impl Hakata {
             .text_size(px(11.5))
             .line_height(px(16.0))
             .child(icon("icons/search.svg", 13.0, theme.text_tertiary))
-            .child(div().min_w_0().flex_1().child(self.apps_search.clone()));
-
-        if has_content {
-            shell = shell.child(
-                div()
-                    .id("apps-search-clear")
-                    .tab_index(0)
-                    .focus_visible(|style| style.bg(theme.overlay))
-                    .size(px(18.0))
-                    .flex_none()
-                    .rounded(px(5.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .child(icon("icons/x.svg", 11.0, theme.text_ghost))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let field = this.apps_search.clone();
-                        field.update(cx, |field, cx| {
-                            field.set_content("", cx);
-                            field.select_range(0..0, cx);
-                        });
-                        window.focus(&field.read(cx).focus(), cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+            .child(div().min_w_0().flex_1().child(self.apps_search.clone()))
+            .when(has_content, |element| {
+                element.child(
+                    div()
+                        .id("apps-search-clear")
+                        .tab_index(0)
+                        .focus_visible(|style| style.bg(theme.overlay))
+                        .size(px(18.0))
+                        .flex_none()
+                        .rounded(px(5.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_default()
+                        .hover(|element| element.bg(theme.overlay))
+                        .active(|element| element.bg(theme.overlay_strong))
+                        .child(icon("icons/x.svg", 11.0, theme.text_ghost))
+                        .on_click(cx.listener(|this, _, window, cx| {
                             let field = this.apps_search.clone();
                             field.update(cx, |field, cx| {
                                 field.set_content("", cx);
                                 field.select_range(0..0, cx);
                             });
                             window.focus(&field.read(cx).focus(), cx);
-                            cx.stop_propagation();
-                        }
-                    })),
-            );
-        }
+                        }))
+                        .on_key_down(cx.listener(
+                            |this, event: &KeyDownEvent, window, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    let field = this.apps_search.clone();
+                                    field.update(cx, |field, cx| {
+                                        field.set_content("", cx);
+                                        field.select_range(0..0, cx);
+                                    });
+                                    window.focus(&field.read(cx).focus(), cx);
+                                    cx.stop_propagation();
+                                }
+                            },
+                        )),
+                )
+            });
 
-        div()
+        let search_row = div()
             .flex()
             .items_center()
             .gap(px(6.0))
             .child(shell)
             .child(refresh)
-            .into_any_element()
+            .child(self.render_apps_more_trigger(&theme, cx));
+
+        if self.apps_more_menu_open
+            && let Some(bounds) = self.apps_more_menu_bounds.get()
+        {
+            return search_row
+                .child(self.render_apps_more_menu(bounds, cx))
+                .into_any_element();
+        }
+        search_row.into_any_element()
+    }
+
+    /// The `⋮` button at the end of the search row that opens the options
+    /// menu.
+    fn render_apps_more_trigger(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let bounds_ref = self.apps_more_menu_bounds.clone();
+        div()
+            .id("apps-more-trigger")
+            .relative()
+            .tab_index(0)
+            .size(px(24.0))
+            .flex_none()
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .focus_visible(|style| style.bg(theme.overlay))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(
+                canvas(
+                    move |probe: Bounds<Pixels>, _, _| bounds_ref.set(Some(probe)),
+                    |_, _, _, _| (),
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .child(icon("icons/more-vertical.svg", 14.0, theme.text_secondary))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.apps_more_menu_open = !this.apps_more_menu_open;
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.apps_more_menu_open = !this.apps_more_menu_open;
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
+    /// The options dropdown anchored below the `⋮` trigger.
+    fn render_apps_more_menu(&self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) -> AnyElement {
+        self.render_dropdown_card(
+            cx,
+            "apps-more-menu",
+            bounds,
+            self.apps_more_menu_bounds.clone(),
+            close_apps_more_menu,
+            200.0,
+            |theme, cx| {
+                let mut card = div().flex().flex_col().gap(px(1.0));
+                card = card.child(apps_filter_toggle_row(theme, self.apps_more_filter_open, cx));
+                if self.apps_more_filter_open {
+                    for filter in AppFilter::ALL {
+                        card = card.child(apps_filter_option(
+                            theme,
+                            filter,
+                            self.apps_filter == filter,
+                            cx,
+                        ));
+                    }
+                }
+                card
+            },
+        )
+    }
+
+    /// Apply a new apps filter, persist it, close the options menu, and
+    /// re-fetch packages for the selected device.
+    pub(crate) fn set_apps_filter(&mut self, filter: AppFilter, cx: &mut Context<Self>) {
+        self.apps_filter = filter;
+        self.save_settings();
+        self.apps_more_filter_open = false;
+        self.apps_more_menu_open = false;
+        self.refresh_packages(true, cx);
+        cx.notify();
     }
 
     fn render_apps_list(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -792,7 +886,7 @@ impl Hakata {
 
         let mut rows = div().flex().flex_col().gap(px(2.0));
         if !pinned.is_empty() {
-            rows = rows.child(section_header(&theme, "Pinned"));
+            rows = rows.child(section_header(&theme, &tr!("apps.list.pinned")));
             for package in &pinned {
                 rows = rows.child(self.render_package_row((*package).clone(), cx));
             }
@@ -800,7 +894,7 @@ impl Hakata {
         }
         if !unpinned.is_empty() {
             if !pinned.is_empty() {
-                rows = rows.child(section_header(&theme, "All Apps"));
+                rows = rows.child(section_header(&theme, &self.apps_filter.label()));
             }
             for package in &unpinned {
                 rows = rows.child(self.render_package_row((*package).clone(), cx));
@@ -935,7 +1029,7 @@ impl Hakata {
         let theme = Theme::current(cx);
         let has_query = !self.apps_search.read(cx).is_empty();
         let message = if self.selected_device.is_none() {
-            "No device selected".to_string()
+            tr!("common.no_device_selected")
         } else if self.packages_loading {
             return div()
                 .size_full()
@@ -961,15 +1055,15 @@ impl Hakata {
                     div()
                         .text_size(px(11.5))
                         .text_color(theme.text_tertiary)
-                        .child(SharedString::from("Loading apps…")),
+                        .child(tr_cow!("apps.loading")),
                 )
                 .into_any_element();
         } else if let Some(error) = &self.packages_error {
             error.clone()
         } else if has_query {
-            "No matching apps".to_string()
+            tr!("apps.no_matching")
         } else {
-            "No apps found".to_string()
+            tr!("apps.none")
         };
         div()
             .size_full()
@@ -989,7 +1083,7 @@ impl Hakata {
 
 /// A small uppercase section heading used to separate pinned apps from the
 /// rest of the list.
-fn section_header(theme: &Theme, label: &'static str) -> AnyElement {
+fn section_header(theme: &Theme, label: &str) -> AnyElement {
     div()
         .px(px(8.0))
         .pt(px(6.0))
@@ -998,4 +1092,92 @@ fn section_header(theme: &Theme, label: &'static str) -> AnyElement {
         .text_color(theme.text_tertiary)
         .child(SharedString::from(label))
         .into_any_element()
+}
+
+/// Close the Apps `⋮` options menu.
+fn close_apps_more_menu(this: &mut Hakata, cx: &mut Context<Hakata>) {
+    this.apps_more_menu_open = false;
+    cx.notify();
+}
+
+/// The "Filter by" expandable row in the Apps `⋮` options menu.
+fn apps_filter_toggle_row(theme: &Theme, open: bool, cx: &mut Context<Hakata>) -> Stateful<Div> {
+    div()
+        .id("apps-more-filter")
+        .tab_index(0)
+        .px(px(8.0))
+        .h(px(28.0))
+        .rounded(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .cursor_default()
+        .focus_visible(|style| style.bg(theme.overlay))
+        .hover(|element| element.bg(theme.overlay))
+        .active(|element| element.bg(theme.overlay_strong))
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.apps_more_filter_open = !this.apps_more_filter_open;
+            cx.notify();
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.apps_more_filter_open = !this.apps_more_filter_open;
+                cx.notify();
+                cx.stop_propagation();
+            }
+        }))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(11.5))
+                .text_color(theme.text_secondary)
+                .child(tr_cow!("apps.filter_by")),
+        )
+        .child(icon("icons/chevron-right.svg", 11.0, theme.text_tertiary).when(open, |icon| {
+            icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(0.25)))
+        }))
+}
+
+/// One selectable filter row in the Apps `⋮` options menu.
+fn apps_filter_option(
+    theme: &Theme,
+    filter: AppFilter,
+    selected: bool,
+    cx: &mut Context<Hakata>,
+) -> Stateful<Div> {
+    div()
+        .id(SharedString::from(format!("apps-filter-{}", filter.slug())))
+        .tab_index(0)
+        .pl(px(24.0))
+        .pr(px(8.0))
+        .h(px(26.0))
+        .rounded(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .cursor_default()
+        .focus_visible(|style| style.bg(theme.overlay))
+        .hover(|element| element.bg(theme.overlay))
+        .active(|element| element.bg(theme.overlay_strong))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.set_apps_filter(filter, cx);
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.set_apps_filter(filter, cx);
+                cx.stop_propagation();
+            }
+        }))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(11.5))
+                .text_color(if selected { theme.text } else { theme.text_secondary })
+                .child(filter.label()),
+        )
+        .when(selected, |element| element.child(icon("icons/check.svg", 11.0, theme.accent)))
 }

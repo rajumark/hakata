@@ -23,7 +23,7 @@
 
 ## Patterns
 
-- No i18n; plain English strings.
+- UI strings go through `tr!`/`tr_cow!` (rust-i18n) with keys in `locales/{app,ja,zh-CN}.yml`; add keys to all three catalogs. Keep pure parsers/builders English-only so their tests stay deterministic; translate at render.
 - Long-lived background work goes to `cx.background_executor().spawn`; store the result on the entity, `cx.notify()`, and guard with a generation counter so a superseded result cannot overwrite newer state.
 - Render reads only cached state; never do I/O from `render`.
 - Do not add comments unless asked; match the existing style.

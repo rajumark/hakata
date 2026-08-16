@@ -31,23 +31,23 @@ pub(crate) enum AppAction {
 }
 
 impl AppAction {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Open => "Open",
-            Self::ForceStop => "Force Stop",
-            Self::Restart => "Restart",
-            Self::ClearData => "Clear Data",
-            Self::Uninstall => "Uninstall",
-            Self::Copy => "Copy",
-            Self::AppInfo => "App Info",
-            Self::PlayStore => "Play Store",
-            Self::Enable => "Enable",
-            Self::Disable => "Disable",
-            Self::GrantAll => "Grant All",
-            Self::RevokeAll => "Revoke All",
-            Self::ManagePermissions => "Manage Permissions",
-            Self::Pin => "Pin",
-            Self::Unpin => "Unpin",
+            Self::Open => tr!("action.open"),
+            Self::ForceStop => tr!("action.force_stop"),
+            Self::Restart => tr!("action.restart"),
+            Self::ClearData => tr!("action.clear_data"),
+            Self::Uninstall => tr!("action.uninstall"),
+            Self::Copy => tr!("action.copy"),
+            Self::AppInfo => tr!("action.app_info"),
+            Self::PlayStore => tr!("action.play_store"),
+            Self::Enable => tr!("action.enable"),
+            Self::Disable => tr!("action.disable"),
+            Self::GrantAll => tr!("action.grant_all"),
+            Self::RevokeAll => tr!("action.revoke_all"),
+            Self::ManagePermissions => tr!("action.manage_permissions"),
+            Self::Pin => tr!("action.pin"),
+            Self::Unpin => tr!("action.unpin"),
         }
     }
 
@@ -229,7 +229,7 @@ impl Hakata {
         match action {
             AppAction::Copy => {
                 cx.write_to_clipboard(ClipboardItem::new_string(package.to_string()));
-                self.report_done(format!("Copied {}", package));
+                self.report_done(tr!("action.copied_package", package = package));
             }
             AppAction::Pin => {
                 if !self.pinned_apps.contains(&package) {
@@ -273,13 +273,13 @@ impl Hakata {
         cx: &mut Context<Self>,
     ) {
         let Some(serial) = self.selected_device.clone() else {
-            self.report_error("No device selected".to_string());
+            self.report_error(tr!("common.no_device_selected"));
             return;
         };
         let plan = command_plan(action, package.as_str());
         let epoch = self.app_action_epoch;
         self.app_action_status = Some(AppActionStatus::Running {
-            message: format!("{}…", action.label()),
+            message: tr!("action.running", action = action.label()),
         });
         cx.notify();
         let adb_path = crate::adb::adb_path();
@@ -299,7 +299,7 @@ impl Hakata {
                                         .trim()
                                         .to_string();
                                     Err(if message.is_empty() {
-                                        format!("{} failed", action.label())
+                                        tr!("action.failed", action = action.label())
                                     } else {
                                         message
                                     })
@@ -323,7 +323,7 @@ impl Hakata {
                                             .trim()
                                             .to_string();
                                         last_error = Some(if message.is_empty() {
-                                            format!("{} failed", action.label())
+                                            tr!("action.failed", action = action.label())
                                         } else {
                                             message
                                         });
@@ -348,7 +348,7 @@ impl Hakata {
                     return;
                 }
                 match result {
-                    Ok(()) => this.report_done(format!("{} complete", action.label())),
+                    Ok(()) => this.report_done(tr!("action.complete", action = action.label())),
                     Err(message) => this.report_error(message),
                 }
                 if matches!(
@@ -383,15 +383,16 @@ impl Hakata {
         cx: &mut Context<Self>,
     ) {
         let Some(serial) = self.selected_device.clone() else {
-            self.report_error("No device selected".to_string());
+            self.report_error(tr!("common.no_device_selected"));
             return;
         };
         let permissions = self.permissions.clone();
         if permissions.is_empty() {
-            self.report_error(format!(
-                "No requested permissions to {}",
-                if grant { "grant" } else { "revoke" }
-            ));
+            self.report_error(tr!(if grant {
+                "action.no_requested_grant"
+            } else {
+                "action.no_requested_revoke"
+            }));
             return;
         }
         let total = permissions.len();
@@ -428,7 +429,11 @@ impl Hakata {
                             let message =
                                 String::from_utf8_lossy(&output.stderr).trim().to_string();
                             Some(if message.is_empty() {
-                                format!("{} failed", permission)
+                                tr!(if grant {
+                                    "permissions.grant_failed"
+                                } else {
+                                    "permissions.revoke_failed"
+                                }, name = permission)
                             } else {
                                 message
                             })
@@ -458,14 +463,13 @@ impl Hakata {
                     .unwrap_or(0);
                 this.fetch_package_dump(true, cx);
                 if errors == 0 {
-                    this.report_done(format!(
-                        "{} all {} permissions for {}",
-                        if grant { "Granted" } else { "Revoked" },
-                        total,
-                        package
+                    this.report_done(tr!(
+                        if grant { "action.granted_all" } else { "action.revoked_all" },
+                        package = package,
+                        total = total
                     ));
                 } else {
-                    this.report_error(format!("{} of {} permissions failed", errors, total));
+                    this.report_error(tr!("action.some_failed", errors = errors, total = total));
                 }
                 cx.notify();
             });
@@ -481,10 +485,12 @@ impl Hakata {
         self.app_action_status = Some(AppActionStatus::Error { message });
     }
 
-    fn save_settings(&self) {
+    pub(crate) fn save_settings(&self) {
         let _ = crate::settings::save(&crate::settings::Settings {
             theme: self.theme_preference,
+            language: self.language_preference,
             pinned_apps: self.pinned_apps.iter().map(|p| p.to_string()).collect(),
+            apps_filter: self.apps_filter,
         });
     }
 
@@ -544,8 +550,8 @@ impl Hakata {
         };
         let theme = Theme::current(cx);
         let verb = match request.action {
-            AppAction::Uninstall => format!("uninstall {}", request.package),
-            AppAction::ClearData => format!("clear all data for {}", request.package),
+            AppAction::Uninstall => tr!("action.confirm_uninstall", package = request.package),
+            AppAction::ClearData => tr!("action.confirm_clear_data", package = request.package),
             _ => request.action.label().to_lowercase(),
         };
         let title_row = div()
@@ -557,7 +563,7 @@ impl Hakata {
                     .text_size(px(13.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(SharedString::from(request.action.label())),
+                    .child(request.action.label()),
             )
             .child(div().flex_1());
 
@@ -578,7 +584,7 @@ impl Hakata {
             .hover(|element| element.bg(theme.overlay))
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .on_click(cx.listener(|this, _, _, cx| this.cancel_confirmation(cx)))
-            .child(SharedString::from("Cancel"));
+            .child(tr_cow!("action.cancel"));
 
         let confirm = div()
             .id("confirm-ok")
@@ -602,7 +608,7 @@ impl Hakata {
             .active(|element| element.opacity(0.85))
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .on_click(cx.listener(|this, _, _, cx| this.confirm_destructive_action(cx)))
-            .child(SharedString::from(request.action.label()));
+            .child(request.action.label());
 
         let card = div()
             .w(px(360.0))
@@ -622,10 +628,7 @@ impl Hakata {
                     .text_size(px(11.5))
                     .line_height(px(17.0))
                     .text_color(theme.text_secondary)
-                    .child(SharedString::from(format!(
-                        "This will {}. This cannot be undone.",
-                        verb
-                    ))),
+                    .child(tr!("action.confirm_body", verb = verb)),
             )
             .child(div().flex().justify_end().gap(px(8.0)).child(cancel).child(confirm));
 
@@ -668,10 +671,11 @@ impl Hakata {
                     .text_size(px(13.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(SharedString::from(format!(
-                        "{} permissions",
-                        if run.grant { "Granting" } else { "Revoking" }
-                    ))),
+                    .child(tr!(if run.grant {
+                        "action.granting"
+                    } else {
+                        "action.revoking"
+                    })),
             )
             .child(div().flex_1())
             .child(
@@ -703,12 +707,11 @@ impl Hakata {
                     .text_size(px(11.0))
                     .line_height(px(16.0))
                     .text_color(theme.text_secondary)
-                    .child(SharedString::from(format!(
-                        "{} {} requested permissions for {}",
-                        if run.grant { "Grant" } else { "Revoke" },
-                        run.total,
-                        run.package
-                    ))),
+                    .child(tr!(
+                        if run.grant { "action.grant_summary" } else { "action.revoke_summary" },
+                        package = run.package,
+                        total = run.total
+                    )),
             )
             .child(bar);
         if !run.errors.is_empty() {
@@ -717,10 +720,7 @@ impl Hakata {
                     .w_full()
                     .text_size(px(11.0))
                     .text_color(theme.danger)
-                    .child(SharedString::from(format!(
-                        "{} failed so far",
-                        run.errors.len()
-                    ))),
+                    .child(tr!("action.failed_so_far", count = run.errors.len())),
             );
         }
         let card = div()
@@ -836,7 +836,7 @@ fn context_menu_item(
                 }
             }),
         )
-        .child(SharedString::from(action.label()))
+        .child(action.label())
 }
 
 fn context_menu_more_row(theme: &Theme, open: bool, cx: &mut Context<Hakata>) -> Stateful<Div> {
@@ -864,7 +864,7 @@ fn context_menu_more_row(theme: &Theme, open: bool, cx: &mut Context<Hakata>) ->
                 .min_w_0()
                 .text_size(px(11.5))
                 .text_color(theme.text_secondary)
-                .child(SharedString::from("More")),
+                .child(tr_cow!("action.more")),
         )
         .child(
             icon("icons/chevron-right.svg", 11.0, theme.text_tertiary).when(open, |icon| {

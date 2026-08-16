@@ -3,6 +3,7 @@ use gpui::{
     MouseButton, ParentElement, SharedString, Stateful, Styled, div, px, prelude::*,
 };
 
+use crate::i18n::AppLanguage;
 use crate::theme::Theme;
 
 use super::{Hakata, icon};
@@ -24,12 +25,12 @@ pub(crate) enum PreferencesPage {
 impl PreferencesPage {
     pub(crate) const ALL: [Self; 4] = [Self::Theme, Self::Alerts, Self::Shortcut, Self::About];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Theme => "Theme",
-            Self::Alerts => "Alerts",
-            Self::Shortcut => "Shortcut",
-            Self::About => "About",
+            Self::Theme => tr!("preferences.section.theme"),
+            Self::Alerts => tr!("preferences.section.alerts"),
+            Self::Shortcut => tr!("preferences.section.shortcut"),
+            Self::About => tr!("preferences.section.about"),
         }
     }
 
@@ -78,7 +79,7 @@ impl Hakata {
                     .text_size(px(10.5))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_tertiary)
-                    .child(SharedString::from("PREFERENCES")),
+                    .child(tr_cow!("preferences.header")),
             )
             .child(
                 div()
@@ -140,7 +141,7 @@ impl Hakata {
                     } else {
                         theme.text_secondary
                     })
-                    .child(SharedString::from(page.label())),
+                    .child(page.label()),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.selected_preferences_page = page;
@@ -173,7 +174,7 @@ impl Hakata {
                     .truncate()
                     .text_size(px(15.0))
                     .text_color(theme.text)
-                    .child(SharedString::from(page.label())),
+                    .child(page.label()),
             )
             .child(div().h(px(10.0)))
             .child(
@@ -226,7 +227,7 @@ impl Hakata {
                                     .text_size(px(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(SharedString::from("Theme")),
+                                    .child(tr_cow!("preferences.theme")),
                             )
                             .child(
                                 div()
@@ -234,9 +235,7 @@ impl Hakata {
                                     .text_size(px(12.5))
                                     .line_height(px(18.0))
                                     .text_color(theme.text_secondary)
-                                    .child(SharedString::from(
-                                        "Choose how the app looks and matches your system.",
-                                    )),
+                                    .child(tr_cow!("preferences.theme_description")),
                             ),
                     )
                     .child(theme_selector),
@@ -260,7 +259,7 @@ impl Hakata {
                                     .text_size(px(13.5))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
-                                    .child(SharedString::from("Language")),
+                                    .child(tr_cow!("language.title")),
                             )
                             .child(
                                 div()
@@ -268,9 +267,7 @@ impl Hakata {
                                     .text_size(px(12.5))
                                     .line_height(px(18.0))
                                     .text_color(theme.text_secondary)
-                                    .child(SharedString::from(
-                                        "Choose the language used in the interface.",
-                                    )),
+                                    .child(tr_cow!("language.description")),
                             ),
                     )
                     .child(language_selector),
@@ -297,14 +294,14 @@ impl Hakata {
                     .truncate()
                     .text_size(px(11.0))
                     .text_color(theme.text_secondary)
-                    .child(SharedString::from("Language")),
+                    .child(tr_cow!("language.title")),
             )
             .child(
                 div()
                     .flex_none()
                     .text_size(px(11.0))
                     .text_color(theme.text)
-                    .child(SharedString::from("English")),
+                    .child(self.language_preference.label()),
             )
             .child(
                 icon("icons/chevron-down.svg", 12.0, theme.text_tertiary).when(
@@ -332,33 +329,49 @@ impl Hakata {
             Self::close_language_menu,
             200.0,
             |theme, cx| {
-                div().child(
-                    div()
-                        .id("language-menu-english")
-                        .mx(px(4.0))
-                        .px(px(8.0))
-                        .min_h(px(26.0))
-                        .rounded(px(6.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .cursor_default()
-                        .hover(|element| element.bg(theme.overlay))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(px(11.5))
-                                .text_color(theme.text)
-                                .child(SharedString::from("English")),
-                        )
-                        .child(icon("icons/check.svg", 11.0, theme.text_tertiary))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| this.close_language_menu(cx)),
-                        ),
-                )
+                let mut card = div();
+                for language in AppLanguage::ALL {
+                    let selected = self.language_preference == language;
+                    card = card.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "language-menu-{}",
+                                format!("{language:?}").to_lowercase()
+                            )))
+                            .mx(px(4.0))
+                            .px(px(8.0))
+                            .min_h(px(26.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .cursor_default()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(11.5))
+                                    .text_color(if selected {
+                                        theme.text
+                                    } else {
+                                        theme.text_secondary
+                                    })
+                                    .child(language.label()),
+                            )
+                            .when(selected, |element| {
+                                element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                            })
+                            .hover(|element| element.bg(theme.overlay))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_language_preference(language, cx)
+                                }),
+                            ),
+                    );
+                }
+                card
             },
         );
         trigger.child(surface).into_any_element()
@@ -389,13 +402,13 @@ impl Hakata {
                 div()
                     .text_size(px(13.0))
                     .text_color(theme.text_secondary)
-                    .child(SharedString::from(page.label())),
+                    .child(page.label()),
             )
             .child(
                 div()
                     .text_size(px(11.0))
                     .text_color(theme.text_ghost)
-                    .child(SharedString::from("coming soon")),
+                    .child(tr_cow!("common.coming_soon")),
             )
             .into_any_element()
     }

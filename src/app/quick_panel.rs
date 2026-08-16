@@ -92,7 +92,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-back",
                             "icons/arrow-left.svg",
-                            "Back",
+                            tr!("quick.back"),
                             serial.clone(),
                             cx,
                             press_back,
@@ -100,7 +100,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-home",
                             "icons/home.svg",
-                            "Home",
+                            tr!("quick.home"),
                             serial.clone(),
                             cx,
                             press_home,
@@ -108,7 +108,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-recent",
                             "icons/layers.svg",
-                            "Recent",
+                            tr!("quick.recent"),
                             serial.clone(),
                             cx,
                             press_recent,
@@ -118,7 +118,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-volume-up",
                             "icons/volume-2.svg",
-                            "Volume Up",
+                            tr!("quick.volume_up"),
                             serial.clone(),
                             cx,
                             press_volume_up,
@@ -126,7 +126,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-volume-down",
                             "icons/volume-1.svg",
-                            "Volume Down",
+                            tr!("quick.volume_down"),
                             serial.clone(),
                             cx,
                             press_volume_down,
@@ -134,7 +134,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-play",
                             "icons/play.svg",
-                            "Play",
+                            tr!("quick.play"),
                             serial.clone(),
                             cx,
                             media_play,
@@ -142,7 +142,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-pause",
                             "icons/pause.svg",
-                            "Pause",
+                            tr!("quick.pause"),
                             serial.clone(),
                             cx,
                             media_pause,
@@ -150,7 +150,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-mute",
                             "icons/volume-x.svg",
-                            "Mute",
+                            tr!("quick.mute"),
                             serial.clone(),
                             cx,
                             volume_mute,
@@ -160,7 +160,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-settings",
                             "icons/settings.svg",
-                            "Settings",
+                            tr!("quick.settings"),
                             serial.clone(),
                             cx,
                             open_settings,
@@ -168,7 +168,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-lock",
                             "icons/lock.svg",
-                            "Lock",
+                            tr!("quick.lock"),
                             serial.clone(),
                             cx,
                             press_power,
@@ -176,7 +176,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-power",
                             "icons/power.svg",
-                            "Power",
+                            tr!("quick.power"),
                             serial.clone(),
                             cx,
                             long_press_power,
@@ -184,7 +184,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-screenshot",
                             "icons/camera.svg",
-                            "Screenshot",
+                            tr!("quick.screenshot"),
                             serial.clone(),
                             cx,
                             capture_screenshot,
@@ -194,7 +194,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-quick-settings",
                             "icons/layout-grid.svg",
-                            "Quick Settings",
+                            tr!("quick.quick_settings"),
                             serial.clone(),
                             cx,
                             expand_quick_settings,
@@ -202,7 +202,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-notifications",
                             "icons/bell.svg",
-                            "Notifications",
+                            tr!("quick.notifications"),
                             serial.clone(),
                             cx,
                             expand_notifications,
@@ -210,7 +210,7 @@ impl Hakata {
                         quick_chip(
                             "quick-panel-collapse",
                             "icons/chevrons-down-up.svg",
-                            "Collapse",
+                            tr!("quick.collapse"),
                             serial.clone(),
                             cx,
                             collapse_all,
@@ -221,7 +221,7 @@ impl Hakata {
                             .child(quick_chip(
                                 "quick-panel-developer",
                                 "icons/wrench.svg",
-                                "Developer",
+                                tr!("quick.developer"),
                                 serial.clone(),
                                 cx,
                                 open_developer_settings,
@@ -251,7 +251,7 @@ impl Hakata {
             .focus_visible(|style| style.bg(theme.overlay))
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
-            .tooltip(Tooltip::text("Tap options"))
+            .tooltip(Tooltip::text(tr!("quick.tap_options")))
             .child(
                 canvas(
                     move |probe: Bounds<Pixels>, _, _| bounds_ref.set(Some(probe)),
@@ -287,7 +287,7 @@ impl Hakata {
                 div()
                     .child(tap_menu_item(
                         "quick-panel-tap-show",
-                        "Show tap dot",
+                        tr!("quick.show_tap"),
                         theme,
                         serial.clone(),
                         cx,
@@ -295,7 +295,7 @@ impl Hakata {
                     ))
                     .child(tap_menu_item(
                         "quick-panel-tap-hide",
-                        "Hide tap dot",
+                        tr!("quick.hide_tap"),
                         theme,
                         serial.clone(),
                         cx,
@@ -356,7 +356,7 @@ fn chip_group_shell(theme: &Theme) -> Div {
 fn quick_chip(
     id: &'static str,
     icon_path: &'static str,
-    tooltip: &'static str,
+    tooltip: String,
     serial: SharedString,
     cx: &mut Context<Hakata>,
     run: fn(&mut Hakata, SharedString, &mut Context<Hakata>),
@@ -393,7 +393,7 @@ fn quick_chip(
 
 fn tap_menu_item(
     id: &'static str,
-    label: &'static str,
+    label: String,
     theme: &Theme,
     serial: SharedString,
     cx: &mut Context<Hakata>,
@@ -420,7 +420,7 @@ fn tap_menu_item(
                 cx.stop_propagation();
             }),
         )
-        .child(SharedString::from(label))
+        .child(label)
 }
 
 /// Fire `adb -s <serial> shell <args>` on the background executor. One-shot:

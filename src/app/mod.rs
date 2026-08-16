@@ -11,6 +11,7 @@ use gpui::{
     anchored, canvas, deferred, div, prelude::*, px,
 };
 
+use crate::adb::AppFilter;
 use crate::input::{SearchField, SearchFieldEvent};
 use crate::theme::{Theme, ThemePreference};
 
@@ -61,14 +62,14 @@ impl MenuPage {
         Self::Debug,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::NewTask => "New Task",
-            Self::Search => "Search",
-            Self::Apps => "Apps",
-            Self::Settings => "Settings",
-            Self::Debug => "Debug",
-            Self::Preferences => "Preferences",
+            Self::NewTask => tr!("page.new_task"),
+            Self::Search => tr!("page.search"),
+            Self::Apps => tr!("page.apps"),
+            Self::Settings => tr!("page.settings"),
+            Self::Debug => tr!("page.debug"),
+            Self::Preferences => tr!("page.preferences"),
         }
     }
 
@@ -120,6 +121,7 @@ pub struct Hakata {
     pub(crate) device_trigger_focus: FocusHandle,
     pub(crate) device_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     pub(crate) theme_preference: ThemePreference,
+    pub(crate) language_preference: crate::i18n::AppLanguage,
     pub(crate) theme_menu_open: bool,
     pub(crate) theme_trigger_focus: FocusHandle,
     pub(crate) theme_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -173,18 +175,22 @@ pub struct Hakata {
     pub(crate) pinned_apps: Vec<SharedString>,
     pub(crate) tap_menu_open: bool,
     pub(crate) tap_menu_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    pub(crate) apps_more_menu_open: bool,
+    pub(crate) apps_more_menu_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    pub(crate) apps_more_filter_open: bool,
+    pub(crate) apps_filter: AppFilter,
 }
 
 impl Hakata {
     pub fn new(cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
-            let apps_search = cx.new(|cx| SearchField::new(cx).placeholder("Search apps"));
+            let apps_search = cx.new(|cx| SearchField::new(cx).placeholder(tr!("apps.search_placeholder")));
             let _apps_search_subscription =
                 cx.subscribe(&apps_search, |_, _, _: &SearchFieldEvent, cx| {
                     cx.notify();
                 });
             let permissions_search =
-                cx.new(|cx| SearchField::new(cx).placeholder("Search permissions"));
+                cx.new(|cx| SearchField::new(cx).placeholder(tr!("permissions.search_placeholder")));
             let _permissions_search_subscription =
                 cx.subscribe(&permissions_search, |_, _, _: &SearchFieldEvent, cx| {
                     cx.notify();
@@ -205,6 +211,7 @@ impl Hakata {
                 device_trigger_focus: cx.focus_handle(),
                 device_trigger_bounds: Rc::new(Cell::new(None)),
                 theme_preference: crate::theme::theme_preference(cx),
+                language_preference: crate::settings::load().language,
                 theme_menu_open: false,
                 theme_trigger_focus: cx.focus_handle(),
                 theme_trigger_bounds: Rc::new(Cell::new(None)),
@@ -262,6 +269,10 @@ impl Hakata {
                     .collect(),
                 tap_menu_open: false,
                 tap_menu_bounds: Rc::new(Cell::new(None)),
+                apps_more_menu_open: false,
+                apps_more_menu_bounds: Rc::new(Cell::new(None)),
+                apps_more_filter_open: false,
+                apps_filter: crate::settings::load().apps_filter,
             }
         })
     }
@@ -684,9 +695,33 @@ impl Hakata {
         crate::theme::set_theme_preference(preference, cx);
         let _ = crate::settings::save(&crate::settings::Settings {
             theme: preference,
+            language: self.language_preference,
             pinned_apps: self.pinned_apps.iter().map(|p| p.to_string()).collect(),
+            apps_filter: self.apps_filter,
         });
         self.theme_menu_open = false;
+        cx.notify();
+    }
+
+    pub(crate) fn set_language_preference(
+        &mut self,
+        language: crate::i18n::AppLanguage,
+        cx: &mut Context<Self>,
+    ) {
+        if self.language_preference == language {
+            self.language_menu_open = false;
+            cx.notify();
+            return;
+        }
+        self.language_preference = language;
+        crate::i18n::set_language(language);
+        let _ = crate::settings::save(&crate::settings::Settings {
+            theme: self.theme_preference,
+            language,
+            pinned_apps: self.pinned_apps.iter().map(|p| p.to_string()).collect(),
+            apps_filter: self.apps_filter,
+        });
+        self.language_menu_open = false;
         cx.notify();
     }
 
@@ -819,7 +854,7 @@ impl Hakata {
                             .text_size(px(14.0))
                             .text_color(theme.text_secondary)
                             .child(icon(page.icon(), 16.0, theme.text_ghost))
-                            .child(SharedString::from(format!("{} coming soon", page.label()))),
+                            .child(tr!("page.coming_soon", page = page.label())),
                     )
                     .into_any_element()
             }

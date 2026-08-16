@@ -1,0 +1,193 @@
+_version: 1
+
+common.coming_soon: 即将推出
+common.no_device_selected: 未选择设备
+common.retry: 重试
+common.refresh: 刷新
+common.copy: 复制
+page.new_task: 新建任务
+page.search: 搜索
+page.apps: 应用
+page.settings: 设置
+page.debug: 调试
+page.preferences: 偏好设置
+page.coming_soon: "%{page} 即将推出"
+theme.system: 跟随系统
+theme.light: 浅色
+theme.dark: 深色
+language.title: 语言
+language.description: 选择界面使用的语言
+language.system: 跟随系统
+settings.appearance: 外观
+settings.theme: 主题
+preferences.header: 偏好设置
+preferences.section.theme: 主题
+preferences.section.alerts: 提醒
+preferences.section.shortcut: 快捷键
+preferences.section.about: 关于
+preferences.theme: 主题
+preferences.theme_description: 选择应用的外观以及是否跟随系统
+device.no_device: 无设备
+device.no_devices: 没有设备
+device.emulators: 模拟器
+emulators.title: 模拟器
+emulators.detecting: 正在检测模拟器…
+emulators.none: 未找到模拟器。请使用 Android Studio 或 avdmanager 创建。
+emulators.binary_not_found: 未找到 Android SDK 模拟器程序
+apps.search_placeholder: 搜索应用
+apps.tab.overview: 概览
+apps.tab.permissions: 权限
+apps.tab.paths: 路径
+apps.tab.files: 文件
+apps.no_app_selected: 未选择应用
+apps.loading_package_info: 正在加载软件包信息…
+apps.no_package_info: 没有软件包信息
+apps.version_name: 版本名称
+apps.version_code: 版本号
+apps.target_sdk: 目标 SDK
+apps.min_sdk: 最低 SDK
+apps.uid: UID
+apps.first_install: 首次安装
+apps.last_update: 最近更新
+apps.data_dir: 数据目录
+apps.code_path: 代码路径
+apps.flags: 标志
+apps.list.pinned: 已固定
+apps.list.all: 所有应用
+apps.loading: 正在加载应用…
+apps.no_matching: 没有匹配的应用
+apps.none: 未找到应用
+apps.filter_by: 筛选
+apps.filter.all: 所有应用
+apps.filter.user: 用户应用
+apps.filter.system: 系统应用
+apps.filter.enabled: 已启用应用
+apps.filter.disabled: 已禁用应用
+permissions.search_placeholder: 搜索权限
+permissions.segment.runtime: 运行时
+permissions.segment.install: 安装
+permissions.segment.declared: 已声明
+permissions.segment.requested: 已请求
+permissions.grant_all: 全部授予
+permissions.revoke_all: 全部撤销
+permissions.granted: 已授予
+permissions.denied: 已拒绝
+permissions.unknown: —
+permissions.no_runtime: 没有运行时权限
+permissions.no_install: 没有安装权限
+permissions.no_declared: 没有已声明的权限
+permissions.no_requested: 没有已请求的权限
+permissions.loading: 正在加载权限…
+permissions.app_info: 应用信息
+permissions.special_access: 特殊应用访问权限
+permissions.special.overlay: 显示在其他应用上层
+permissions.special.accessibility: 无障碍服务
+permissions.special.default_apps: 默认应用
+permissions.special.write_settings: 修改系统设置
+permissions.special.usage_access: 使用情况访问权限
+permissions.special.notification_access: 通知使用权
+permissions.special.all_files_access: 所有文件访问权限
+permissions.special.install_unknown: 安装未知应用
+permissions.special.do_not_disturb: 免打扰权限
+permissions.opened_settings: 已打开设置
+permissions.open_settings_failed: 无法打开设置
+permissions.opened_app_info: 已打开 %{package} 的应用信息
+permissions.open_app_info_failed: 无法打开应用信息
+permissions.grant_failed: 无法授予 %{name}
+permissions.revoke_failed: 无法撤销 %{name}
+paths.category.installation: 安装
+paths.category.internal_data: 内部数据
+paths.category.external_storage: 外部存储
+paths.category.runtime: 运行时
+paths.category.system: 系统
+paths.apk: APK
+paths.split_apk: 拆分 APK %{index}
+paths.code_path: 代码路径
+paths.native_libraries: 原生库
+paths.oat_directory: OAT 目录
+paths.resource_path: 资源路径
+paths.native_library_dir: 原生库目录
+paths.data_directory: 数据目录
+paths.shared_preferences: 共享偏好设置
+paths.databases: 数据库
+paths.cache: 缓存
+paths.code_cache: 代码缓存
+paths.files: 文件
+paths.data_symlink: 数据（符号链接）
+paths.external_data: 外部数据
+paths.external_files: 外部文件
+paths.external_cache: 外部缓存
+paths.external_media: 外部媒体
+paths.obb: OBB 文件
+paths.profile_current: 配置文件（当前）
+paths.profile_reference: 配置文件（参考）
+paths.odex: 已编译 DEX（ODEX）
+paths.vdex: 已验证 DEX（VDEX）
+paths.package_registry: 软件包注册表
+paths.component_restrictions: 组件限制
+paths.loading: 正在加载路径…
+paths.none: 未找到路径
+paths.copied: 已复制 %{path}
+action.open: 打开
+action.force_stop: 强行停止
+action.restart: 重启
+action.clear_data: 清除数据
+action.uninstall: 卸载
+action.copy: 复制
+action.app_info: 应用信息
+action.play_store: Play 商店
+action.enable: 启用
+action.disable: 停用
+action.grant_all: 全部授予
+action.revoke_all: 全部撤销
+action.manage_permissions: 管理权限
+action.pin: 固定
+action.unpin: 取消固定
+action.more: 更多
+action.cancel: 取消
+action.running: "%{action}…"
+action.failed: "%{action} 失败"
+action.complete: "%{action} 已完成"
+action.copied_package: 已复制 %{package}
+action.confirm_uninstall: 卸载 %{package}
+action.confirm_clear_data: 清除 %{package} 的所有数据
+action.confirm_body: 将执行此操作：%{verb}。此操作无法撤销。
+action.granting: 正在授予权限
+action.revoking: 正在撤销权限
+action.grant_summary: 为 %{package} 授予请求的 %{total} 个权限
+action.revoke_summary: 撤销 %{package} 请求的 %{total} 个权限
+action.failed_so_far: 目前已有 %{count} 项失败
+action.no_requested_grant: 没有可授予的请求权限
+action.no_requested_revoke: 没有可撤销的请求权限
+action.granted_all: 已为 %{package} 授予全部 %{total} 个权限
+action.revoked_all: 已撤销 %{package} 的全部 %{total} 个权限
+action.some_failed: "%{total} 个权限中有 %{errors} 个失败"
+debug.copy: 复制
+debug.not_checked: 未检查
+debug.checking: 正在检查…
+debug.adb_path: adb 路径
+debug.adb_version: adb 版本
+debug.device: 设备
+debug.title: 调试
+debug.adb_not_found: 在 %{path} 未找到 adb
+debug.downloading: 正在下载 adb
+debug.download_failed: 下载失败
+quick.back: 返回
+quick.home: 主页
+quick.recent: 最近应用
+quick.volume_up: 调高音量
+quick.volume_down: 调低音量
+quick.play: 播放
+quick.pause: 暂停
+quick.mute: 静音
+quick.settings: 设置
+quick.lock: 锁定
+quick.power: 电源
+quick.screenshot: 截屏
+quick.quick_settings: 快捷设置
+quick.notifications: 通知
+quick.collapse: 收起
+quick.developer: 开发者选项
+quick.tap_options: 点按选项
+quick.show_tap: 显示触摸点
+quick.hide_tap: 隐藏触摸点

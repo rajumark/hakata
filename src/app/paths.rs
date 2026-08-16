@@ -31,13 +31,13 @@ pub(crate) enum PathCategory {
 }
 
 impl PathCategory {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Installation => "Installation",
-            Self::InternalData => "Internal Data",
-            Self::ExternalStorage => "External Storage",
-            Self::Runtime => "Runtime",
-            Self::System => "System",
+            Self::Installation => tr!("paths.category.installation"),
+            Self::InternalData => tr!("paths.category.internal_data"),
+            Self::ExternalStorage => tr!("paths.category.external_storage"),
+            Self::Runtime => tr!("paths.category.runtime"),
+            Self::System => tr!("paths.category.system"),
         }
     }
 
@@ -343,6 +343,41 @@ fn build_path_items(pm_path_output: &str, dump: &str, package: &str) -> Vec<Path
     items
 }
 
+/// Translate a row label produced by `build_path_items` at render time. The
+/// builder keeps English labels so its tests stay deterministic; the mapping
+/// mirrors the `paths.*` catalog keys.
+fn translate_path_label(label: &str) -> String {
+    match label {
+        "APK" => tr!("paths.apk"),
+        "Code Path" => tr!("paths.code_path"),
+        "Native Libraries" => tr!("paths.native_libraries"),
+        "OAT Directory" => tr!("paths.oat_directory"),
+        "Resource Path" => tr!("paths.resource_path"),
+        "Native Library Dir" => tr!("paths.native_library_dir"),
+        "Data Directory" => tr!("paths.data_directory"),
+        "Shared Preferences" => tr!("paths.shared_preferences"),
+        "Databases" => tr!("paths.databases"),
+        "Cache" => tr!("paths.cache"),
+        "Code Cache" => tr!("paths.code_cache"),
+        "Files" => tr!("paths.files"),
+        "Data (symlink)" => tr!("paths.data_symlink"),
+        "External Data" => tr!("paths.external_data"),
+        "External Files" => tr!("paths.external_files"),
+        "External Cache" => tr!("paths.external_cache"),
+        "External Media" => tr!("paths.external_media"),
+        "OBB Files" => tr!("paths.obb"),
+        "Profile (Current)" => tr!("paths.profile_current"),
+        "Profile (Reference)" => tr!("paths.profile_reference"),
+        "Compiled DEX (ODEX)" => tr!("paths.odex"),
+        "Verified DEX (VDEX)" => tr!("paths.vdex"),
+        "Package Registry" => tr!("paths.package_registry"),
+        "Component Restrictions" => tr!("paths.component_restrictions"),
+        _ => label
+            .strip_prefix("Split APK ")
+            .map_or_else(|| label.to_string(), |index| tr!("paths.split_apk", index = index)),
+    }
+}
+
 impl Hakata {
     fn reset_paths(&mut self) {
         self.paths.device = None;
@@ -448,7 +483,7 @@ impl Hakata {
         let theme = Theme::current(cx);
         let package = match &self.selected_package {
             Some(package) => package.clone(),
-            None => return self.render_paths_center(&theme, "No app selected"),
+            None => return self.render_paths_center(&theme, &tr!("apps.no_app_selected")),
         };
         if self.package_dump_loading || self.paths.loading {
             return self.render_paths_loading(&theme);
@@ -460,12 +495,12 @@ impl Hakata {
             return self.render_paths_error(&theme, error, cx);
         }
         let Some(dump) = self.package_dump_raw.as_deref() else {
-            return self.render_paths_center(&theme, "No paths found");
+            return self.render_paths_center(&theme, &tr!("paths.none"));
         };
 
         let items = build_path_items(self.paths.raw.as_deref().unwrap_or(""), dump, package.as_str());
         if items.is_empty() {
-            return self.render_paths_center(&theme, "No paths found");
+            return self.render_paths_center(&theme, &tr!("paths.none"));
         }
 
         let mut categories: Vec<PathCategory> = Vec::new();
@@ -556,7 +591,7 @@ impl Hakata {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .child(SharedString::from(category.label())),
+                    .child(category.label()),
             )
             .child(
                 div()
@@ -610,7 +645,7 @@ impl Hakata {
                     .text_size(px(11.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text_secondary)
-                    .child(SharedString::from(item.label.as_str())),
+                    .child(translate_path_label(&item.label)),
             )
             .child(
                 div()
@@ -648,7 +683,7 @@ impl Hakata {
     fn copy_path(&mut self, path: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
         self.app_action_status = Some(AppActionStatus::Done {
-            message: format!("Copied {}", path),
+            message: tr!("paths.copied", path = path),
         });
         cx.notify();
     }
@@ -694,7 +729,7 @@ impl Hakata {
                 div()
                     .text_size(px(11.5))
                     .text_color(theme.text_tertiary)
-                    .child(SharedString::from("Loading paths…")),
+                    .child(tr_cow!("paths.loading")),
             )
             .into_any_element()
     }
@@ -727,7 +762,7 @@ impl Hakata {
                     cx.stop_propagation();
                 }
             }))
-            .child(SharedString::from("Retry"));
+            .child(tr_cow!("common.retry"));
         div()
             .size_full()
             .flex()

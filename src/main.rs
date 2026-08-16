@@ -3,11 +3,31 @@ use gpui::{
     WindowOptions, actions, point, px, size,
 };
 
+rust_i18n::i18n!("locales", fallback = "en");
+
+macro_rules! tr {
+    ($key:expr) => {
+        crate::i18n::translate($key)
+    };
+    ($key:expr, $($args:tt)*) => {
+        rust_i18n::t!($key, $($args)*).into_owned()
+    };
+}
+
+/// Borrow static translations on hot render paths; interpolation uses `tr!`
+/// because formatted messages necessarily allocate.
+macro_rules! tr_cow {
+    ($key:literal) => {
+        rust_i18n::t!($key)
+    };
+}
+
 mod adb;
 mod app;
 mod app_icons;
 mod assets;
 mod emulator;
+mod i18n;
 mod input;
 mod settings;
 mod theme;
@@ -20,7 +40,9 @@ const APP_ID: &str = "sh.hakata";
 actions!(hakata, [Quit, CloseWindow, ToggleSidebar]);
 
 fn main() {
-    let theme_preference = settings::load().theme;
+    let loaded = settings::load();
+    i18n::set_language(loaded.language);
+    let theme_preference = loaded.theme;
     gpui_platform::application()
         .with_assets(crate::assets::Assets)
         .run(move |cx: &mut App| {
@@ -72,7 +94,6 @@ fn main() {
             cx.activate(true);
 
             cx.on_action({
-                let window = window.clone();
                 move |_: &ToggleSidebar, cx| {
                     window
                         .update(cx, |hakata, _window, cx| hakata.toggle_sidebar(cx))

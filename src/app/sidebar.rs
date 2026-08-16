@@ -10,7 +10,7 @@ use crate::theme::Theme;
 use super::{Hakata, MenuPage, TRAFFIC_LIGHT_CLEARANCE, icon};
 
 const TITLEBAR_HEIGHT: f32 = 48.0;
-const FOOTER_HEIGHT: f32 = 40.0;
+const FOOTER_HEIGHT: f32 = 52.0;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
 
 impl Hakata {
@@ -180,37 +180,62 @@ impl Hakata {
 
     fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
+        let version = SharedString::from(format!("v{}", env!("CARGO_PKG_VERSION")));
         div()
             .flex_none()
             .h(px(FOOTER_HEIGHT))
             .px(px(10.0))
+            .pt(px(4.0))
+            .pb(px(6.0))
             .flex()
-            .items_center()
+            .flex_col()
             .child(
                 div()
-                    .id("sidebar-preferences")
-                    .tab_index(0)
-                    .size(px(26.0))
-                    .rounded(px(6.0))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .cursor_default()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .child(icon("icons/settings.svg", 14.0, theme.text_tertiary))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.select_page(MenuPage::Preferences, window, cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.select_page(MenuPage::Preferences, window, cx);
-                            cx.stop_propagation();
-                        }
-                    })),
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(11.0))
+                            .text_color(theme.text_ghost)
+                            .child("Hakata"),
+                    )
+                    .child(
+                        div()
+                            .id("sidebar-preferences")
+                            .tab_index(0)
+                            .size(px(24.0))
+                            .flex_none()
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_default()
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .hover(|element| element.bg(theme.overlay))
+                            .active(|element| element.bg(theme.overlay_strong))
+                            .child(icon("icons/settings.svg", 13.0, theme.text_tertiary))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.select_page(MenuPage::Preferences, window, cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.select_page(MenuPage::Preferences, window, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    ),
             )
-            .child(div().flex_1())
+            .child(
+                div()
+                    .mt(px(1.0))
+                    .text_size(px(9.5))
+                    .text_color(theme.text_ghost)
+                    .child(version),
+            )
     }
 
     /// The sidebar's device picker. Shows the selected device (or a hint to
@@ -221,7 +246,7 @@ impl Hakata {
         let label = self
             .selected_device
             .clone()
-            .unwrap_or_else(|| SharedString::from("No device"));
+            .unwrap_or_else(|| tr_cow!("device.no_device").into());
         let label_color = if has_selection {
             theme.text
         } else {
@@ -284,7 +309,7 @@ impl Hakata {
                                 .items_center()
                                 .text_size(px(11.5))
                                 .text_color(theme.text_tertiary)
-                                .child(SharedString::from("No devices")),
+                                .child(tr_cow!("device.no_devices")),
                         )
                         .child(
                             div()
@@ -309,7 +334,7 @@ impl Hakata {
                                         .min_w_0()
                                         .text_size(px(11.5))
                                         .text_color(theme.text_secondary)
-                                        .child(SharedString::from("Emulators")),
+                                        .child(tr_cow!("device.emulators")),
                                 )
                                 .child(icon(
                                     "icons/chevron-right.svg",
@@ -546,7 +571,7 @@ impl Hakata {
                     .text_size(px(13.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme.text)
-                    .child(SharedString::from("Emulators")),
+                    .child(tr_cow!("emulators.title")),
             )
             .child(div().flex_1())
             .child(close_button);
@@ -583,7 +608,7 @@ impl Hakata {
             .active(|element| element.bg(theme.overlay_strong))
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .child(icon("icons/refresh-cw.svg", 11.0, theme.text_tertiary))
-            .child(SharedString::from("Refresh"))
+            .child(tr_cow!("common.refresh"))
             .on_click(cx.listener(|this, _, _, cx| this.refresh_emulators(cx)));
 
         let card = div()
@@ -633,7 +658,7 @@ impl Hakata {
                     SharedString::from("emulators-detect-spinner"),
                     &theme,
                 ))
-                .child(SharedString::from("Detecting emulators…"))
+                .child(tr_cow!("emulators.detecting"))
                 .into_any_element();
         }
         if let Some(error) = &self.emulators_error {
@@ -651,9 +676,7 @@ impl Hakata {
                 .text_size(px(11.0))
                 .line_height(px(16.0))
                 .text_color(theme.text_tertiary)
-                .child(SharedString::from(
-                    "No emulators found. Create one with Android Studio or avdmanager.",
-                ))
+                .child(tr_cow!("emulators.none"))
                 .into_any_element();
         }
         let mut list = div()

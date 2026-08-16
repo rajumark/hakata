@@ -1,0 +1,193 @@
+_version: 1
+
+common.coming_soon: 近日公開
+common.no_device_selected: デバイスが選択されていません
+common.retry: 再試行
+common.refresh: 更新
+common.copy: コピー
+page.new_task: 新規タスク
+page.search: 検索
+page.apps: アプリ
+page.settings: 設定
+page.debug: デバッグ
+page.preferences: 環境設定
+page.coming_soon: "%{page} は近日公開"
+theme.system: システム
+theme.light: ライト
+theme.dark: ダーク
+language.title: 言語
+language.description: インターフェースに使用する言語を選択します
+language.system: システム
+settings.appearance: 外観
+settings.theme: テーマ
+preferences.header: 環境設定
+preferences.section.theme: テーマ
+preferences.section.alerts: アラート
+preferences.section.shortcut: ショートカット
+preferences.section.about: このアプリについて
+preferences.theme: テーマ
+preferences.theme_description: アプリの外観とシステムへの追随方法を選択します
+device.no_device: デバイスなし
+device.no_devices: デバイスがありません
+device.emulators: エミュレーター
+emulators.title: エミュレーター
+emulators.detecting: エミュレーターを検出中…
+emulators.none: エミュレーターが見つかりません。Android Studio または avdmanager で作成してください。
+emulators.binary_not_found: Android SDK のエミュレーターバイナリが見つかりません
+apps.search_placeholder: アプリを検索
+apps.tab.overview: 概要
+apps.tab.permissions: 権限
+apps.tab.paths: パス
+apps.tab.files: ファイル
+apps.no_app_selected: アプリが選択されていません
+apps.loading_package_info: パッケージ情報を読み込み中…
+apps.no_package_info: パッケージ情報がありません
+apps.version_name: バージョン名
+apps.version_code: バージョンコード
+apps.target_sdk: ターゲット SDK
+apps.min_sdk: 最小 SDK
+apps.uid: UID
+apps.first_install: 初回インストール
+apps.last_update: 最終更新
+apps.data_dir: データディレクトリ
+apps.code_path: コードパス
+apps.flags: フラグ
+apps.list.pinned: ピン留め
+apps.list.all: すべてのアプリ
+apps.loading: アプリを読み込み中…
+apps.no_matching: 一致するアプリがありません
+apps.none: アプリが見つかりません
+apps.filter_by: フィルタ
+apps.filter.all: すべてのアプリ
+apps.filter.user: ユーザーアプリ
+apps.filter.system: システムアプリ
+apps.filter.enabled: 有効なアプリ
+apps.filter.disabled: 無効なアプリ
+permissions.search_placeholder: 権限を検索
+permissions.segment.runtime: 実行時
+permissions.segment.install: インストール
+permissions.segment.declared: 宣言
+permissions.segment.requested: 要求
+permissions.grant_all: すべて許可
+permissions.revoke_all: すべて取り消し
+permissions.granted: 許可済み
+permissions.denied: 拒否
+permissions.unknown: —
+permissions.no_runtime: 実行時権限がありません
+permissions.no_install: インストール権限がありません
+permissions.no_declared: 宣言された権限がありません
+permissions.no_requested: 要求された権限がありません
+permissions.loading: 権限を読み込み中…
+permissions.app_info: アプリ情報
+permissions.special_access: 特別なアプリアクセス
+permissions.special.overlay: 他のアプリの上に表示
+permissions.special.accessibility: アクセシビリティサービス
+permissions.special.default_apps: 標準のアプリ
+permissions.special.write_settings: システム設定の変更
+permissions.special.usage_access: 使用状況へのアクセス
+permissions.special.notification_access: 通知へのアクセス
+permissions.special.all_files_access: すべてのファイルへのアクセス
+permissions.special.install_unknown: 不明なアプリのインストール
+permissions.special.do_not_disturb: おやすみモードへのアクセス
+permissions.opened_settings: 設定を開きました
+permissions.open_settings_failed: 設定を開けませんでした
+permissions.opened_app_info: "%{package} のアプリ情報を開きました"
+permissions.open_app_info_failed: アプリ情報を開けませんでした
+permissions.grant_failed: "%{name} を許可できませんでした"
+permissions.revoke_failed: "%{name} を取り消せませんでした"
+paths.category.installation: インストール
+paths.category.internal_data: 内部データ
+paths.category.external_storage: 外部ストレージ
+paths.category.runtime: 実行時
+paths.category.system: システム
+paths.apk: APK
+paths.split_apk: スプリット APK %{index}
+paths.code_path: コードパス
+paths.native_libraries: ネイティブライブラリ
+paths.oat_directory: OAT ディレクトリ
+paths.resource_path: リソースパス
+paths.native_library_dir: ネイティブライブラリディレクトリ
+paths.data_directory: データディレクトリ
+paths.shared_preferences: 共有設定
+paths.databases: データベース
+paths.cache: キャッシュ
+paths.code_cache: コードキャッシュ
+paths.files: ファイル
+paths.data_symlink: データ（シンボリックリンク）
+paths.external_data: 外部データ
+paths.external_files: 外部ファイル
+paths.external_cache: 外部キャッシュ
+paths.external_media: 外部メディア
+paths.obb: OBB ファイル
+paths.profile_current: プロファイル（現在）
+paths.profile_reference: プロファイル（参照）
+paths.odex: コンパイル済み DEX（ODEX）
+paths.vdex: 検証済み DEX（VDEX）
+paths.package_registry: パッケージレジストリ
+paths.component_restrictions: コンポーネント制限
+paths.loading: パスを読み込み中…
+paths.none: パスが見つかりません
+paths.copied: "%{path} をコピーしました"
+action.open: 開く
+action.force_stop: 強制停止
+action.restart: 再起動
+action.clear_data: データを消去
+action.uninstall: アンインストール
+action.copy: コピー
+action.app_info: アプリ情報
+action.play_store: Play ストア
+action.enable: 有効にする
+action.disable: 無効にする
+action.grant_all: すべて許可
+action.revoke_all: すべて取り消し
+action.manage_permissions: 権限を管理
+action.pin: ピン留め
+action.unpin: ピン留めを外す
+action.more: その他
+action.cancel: キャンセル
+action.running: "%{action}…"
+action.failed: "%{action} に失敗しました"
+action.complete: "%{action} が完了しました"
+action.copied_package: "%{package} をコピーしました"
+action.confirm_uninstall: "%{package} をアンインストール"
+action.confirm_clear_data: "%{package} のすべてのデータを消去"
+action.confirm_body: この操作では%{verb}します。この操作は元に戻せません。
+action.granting: 権限を許可中
+action.revoking: 権限を取り消し中
+action.grant_summary: "%{package} の要求された権限 %{total} 件を許可"
+action.revoke_summary: "%{package} の要求された権限 %{total} 件を取り消し"
+action.failed_so_far: これまでに %{count} 件失敗
+action.no_requested_grant: 許可する要求された権限がありません
+action.no_requested_revoke: 取り消す要求された権限がありません
+action.granted_all: "%{package} の権限 %{total} 件をすべて許可しました"
+action.revoked_all: "%{package} の権限 %{total} 件をすべて取り消しました"
+action.some_failed: 権限 %{total} 件中 %{errors} 件が失敗しました
+debug.copy: コピー
+debug.not_checked: 未確認
+debug.checking: 確認中…
+debug.adb_path: adb パス
+debug.adb_version: adb バージョン
+debug.device: デバイス
+debug.title: デバッグ
+debug.adb_not_found: "%{path} に adb が見つかりません"
+debug.downloading: adb をダウンロード中
+debug.download_failed: ダウンロードに失敗しました
+quick.back: 戻る
+quick.home: ホーム
+quick.recent: 最近使ったアプリ
+quick.volume_up: 音量を上げる
+quick.volume_down: 音量を下げる
+quick.play: 再生
+quick.pause: 一時停止
+quick.mute: ミュート
+quick.settings: 設定
+quick.lock: ロック
+quick.power: 電源
+quick.screenshot: スクリーンショット
+quick.quick_settings: クイック設定
+quick.notifications: 通知
+quick.collapse: 閉じる
+quick.developer: 開発者向けオプション
+quick.tap_options: タップのオプション
+quick.show_tap: タップを表示
+quick.hide_tap: タップを非表示

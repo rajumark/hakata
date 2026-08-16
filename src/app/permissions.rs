@@ -28,12 +28,12 @@ impl PermissionsSegment {
         Self::Requested,
     ];
 
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> String {
         match self {
-            Self::Runtime => "Runtime",
-            Self::Install => "Install",
-            Self::Declared => "Declared",
-            Self::Requested => "Requested",
+            Self::Runtime => tr!("permissions.segment.runtime"),
+            Self::Install => tr!("permissions.segment.install"),
+            Self::Declared => tr!("permissions.segment.declared"),
+            Self::Requested => tr!("permissions.segment.requested"),
         }
     }
 }
@@ -76,55 +76,55 @@ pub(crate) struct PermissionsState {
 const SPECIAL_ACCESS: [(&str, &str, &str, &str); 9] = [
     (
         "overlay",
-        "Display Over Other Apps",
+        "permissions.special.overlay",
         "icons/shield.svg",
         "android.settings.action.MANAGE_OVERLAY_PERMISSION",
     ),
     (
         "accessibility",
-        "Accessibility Services",
+        "permissions.special.accessibility",
         "icons/smartphone.svg",
         "android.settings.ACCESSIBILITY_SETTINGS",
     ),
     (
         "defaultApps",
-        "Default Apps",
+        "permissions.special.default_apps",
         "icons/apps.svg",
         "android.settings.MANAGE_DEFAULT_APPS_SETTINGS",
     ),
     (
         "writeSettings",
-        "Modify System Settings",
+        "permissions.special.write_settings",
         "icons/settings.svg",
         "android.settings.action.MANAGE_WRITE_SETTINGS",
     ),
     (
         "usageAccess",
-        "Usage Access",
+        "permissions.special.usage_access",
         "icons/gauge.svg",
         "android.settings.USAGE_ACCESS_SETTINGS",
     ),
     (
         "notificationAccess",
-        "Notification Access",
+        "permissions.special.notification_access",
         "icons/alert.svg",
         "android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS",
     ),
     (
         "allFilesAccess",
-        "All Files Access",
+        "permissions.special.all_files_access",
         "icons/folder.svg",
         "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",
     ),
     (
         "installUnknownApps",
-        "Install Unknown Apps",
+        "permissions.special.install_unknown",
         "icons/archive.svg",
         "android.settings.MANAGE_UNKNOWN_APP_SOURCES",
     ),
     (
         "doNotDisturb",
-        "Do Not Disturb Access",
+        "permissions.special.do_not_disturb",
         "icons/pin.svg",
         "android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS",
     ),
@@ -290,7 +290,7 @@ impl Hakata {
     pub(crate) fn toggle_runtime_permission(&mut self, name: SharedString, cx: &mut Context<Self>) {
         let Some(serial) = self.selected_device.clone() else {
             self.app_action_status = Some(AppActionStatus::Error {
-                message: "No device selected".to_string(),
+                message: tr!("common.no_device_selected"),
             });
             cx.notify();
             return;
@@ -355,7 +355,10 @@ impl Hakata {
                             String::from_utf8_lossy(&output.stderr).trim().to_string();
                         this.app_action_status = Some(AppActionStatus::Error {
                             message: if message.is_empty() {
-                                format!("Failed to {} {}", if grant { "grant" } else { "revoke" }, name)
+                                tr!(
+                                    if grant { "permissions.grant_failed" } else { "permissions.revoke_failed" },
+                                    name = name
+                                )
                             } else {
                                 message
                             },
@@ -380,7 +383,7 @@ impl Hakata {
         self.permissions_menu_open = false;
         let Some(serial) = self.selected_device.clone() else {
             self.app_action_status = Some(AppActionStatus::Error {
-                message: "No device selected".to_string(),
+                message: tr!("common.no_device_selected"),
             });
             cx.notify();
             return;
@@ -407,7 +410,7 @@ impl Hakata {
                 match result {
                     Ok(output) if output.status.success() => {
                         this.app_action_status = Some(AppActionStatus::Done {
-                            message: "Opened settings".to_string(),
+                            message: tr!("permissions.opened_settings"),
                         });
                     }
                     Ok(output) => {
@@ -415,7 +418,7 @@ impl Hakata {
                             String::from_utf8_lossy(&output.stderr).trim().to_string();
                         this.app_action_status = Some(AppActionStatus::Error {
                             message: if message.is_empty() {
-                                "Failed to open settings".to_string()
+                                tr!("permissions.open_settings_failed")
                             } else {
                                 message
                             },
@@ -438,7 +441,7 @@ impl Hakata {
         self.permissions_menu_open = false;
         let Some(serial) = self.selected_device.clone() else {
             self.app_action_status = Some(AppActionStatus::Error {
-                message: "No device selected".to_string(),
+                message: tr!("common.no_device_selected"),
             });
             cx.notify();
             return;
@@ -470,7 +473,7 @@ impl Hakata {
                 match result {
                     Ok(output) if output.status.success() => {
                         this.app_action_status = Some(AppActionStatus::Done {
-                            message: format!("Opened App Info for {}", package),
+                            message: tr!("permissions.opened_app_info", package = package),
                         });
                     }
                     Ok(output) => {
@@ -478,7 +481,7 @@ impl Hakata {
                             String::from_utf8_lossy(&output.stderr).trim().to_string();
                         this.app_action_status = Some(AppActionStatus::Error {
                             message: if message.is_empty() {
-                                "Failed to open App Info".to_string()
+                                tr!("permissions.open_app_info_failed")
                             } else {
                                 message
                             },
@@ -508,7 +511,7 @@ impl Hakata {
             return self.render_permissions_error(&theme, error, cx);
         }
         if self.package_dump_raw.is_none() {
-            return self.render_permissions_center(&theme, "No app selected");
+            return self.render_permissions_center(&theme, &tr!("apps.no_app_selected"));
         }
 
         let mut column = div().size_full().flex().flex_col().gap(px(8.0));
@@ -561,7 +564,7 @@ impl Hakata {
                     } else {
                         theme.text_secondary
                     })
-                    .child(SharedString::from(segment.label()))
+                    .child(segment.label())
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_permissions_segment(*segment, cx);
                     }))
@@ -628,7 +631,7 @@ impl Hakata {
                     theme,
                     SharedString::from("apps-permissions-refresh"),
                     "icons/refresh-cw.svg",
-                    "Refresh",
+                    tr!("common.refresh"),
                     |this, cx| {
                         this.fetch_package_dump(true, cx);
                     },
@@ -638,7 +641,7 @@ impl Hakata {
                     theme,
                     SharedString::from("apps-permissions-app-info"),
                     "icons/info.svg",
-                    "App Info",
+                    tr!("permissions.app_info"),
                     |this, cx| {
                         this.open_app_info(cx);
                     },
@@ -658,14 +661,14 @@ impl Hakata {
                         .pb(px(4.0))
                         .text_size(px(10.0))
                         .text_color(theme.text_tertiary)
-                        .child(SharedString::from("Special App Access")),
+                        .child(tr_cow!("permissions.special_access")),
                 );
-                for (id, label, icon_path, action) in SPECIAL_ACCESS {
+                for (id, label_key, icon_path, action) in SPECIAL_ACCESS {
                     card = card.child(menu_row(
                         theme,
                         SharedString::from(format!("apps-permissions-special-{}", id)),
                         icon_path,
-                        label,
+                        tr!(label_key),
                         move |this, cx| {
                             this.start_special_access(action, cx);
                         },
@@ -697,7 +700,7 @@ impl Hakata {
                             &theme,
                             "apps-permissions-grant-all",
                             "icons/check.svg",
-                            "Grant all",
+                            tr!("permissions.grant_all"),
                             package.clone(),
                             true,
                             cx,
@@ -706,7 +709,7 @@ impl Hakata {
                             &theme,
                             "apps-permissions-revoke-all",
                             "icons/x.svg",
-                            "Revoke all",
+                            tr!("permissions.revoke_all"),
                             package,
                             false,
                             cx,
@@ -820,7 +823,7 @@ impl Hakata {
             shown += 1;
         }
         if shown == 0 {
-            return self.render_permissions_center(theme, "No runtime permissions");
+            return self.render_permissions_center(theme, &tr!("permissions.no_runtime"));
         }
         rows.into_any_element()
     }
@@ -906,7 +909,7 @@ impl Hakata {
             shown += 1;
         }
         if shown == 0 {
-            return self.render_permissions_center(theme, "No install permissions");
+            return self.render_permissions_center(theme, &tr!("permissions.no_install"));
         }
         rows.into_any_element()
     }
@@ -914,9 +917,9 @@ impl Hakata {
     fn render_install_row(&self, theme: &Theme, permission: &InstallPermission) -> Stateful<Div> {
         let name = permission.name.clone();
         let (label, color) = match permission.granted {
-            Some(true) => ("Granted", theme.success),
-            Some(false) => ("Denied", theme.danger),
-            None => ("—", theme.text_tertiary),
+            Some(true) => (tr!("permissions.granted"), theme.success),
+            Some(false) => (tr!("permissions.denied"), theme.danger),
+            None => (tr!("permissions.unknown"), theme.text_tertiary),
         };
         div()
             .id(SharedString::from(format!("apps-permission-install-{}", name)))
@@ -949,7 +952,7 @@ impl Hakata {
                     .justify_center()
                     .text_size(px(10.0))
                     .text_color(color)
-                    .child(SharedString::from(label)),
+                    .child(label),
             )
     }
 
@@ -966,7 +969,7 @@ impl Hakata {
             shown += 1;
         }
         if shown == 0 {
-            return self.render_permissions_center(theme, "No declared permissions");
+            return self.render_permissions_center(theme, &tr!("permissions.no_declared"));
         }
         rows.into_any_element()
     }
@@ -1050,7 +1053,7 @@ impl Hakata {
             shown += 1;
         }
         if shown == 0 {
-            return self.render_permissions_center(theme, "No requested permissions");
+            return self.render_permissions_center(theme, &tr!("permissions.no_requested"));
         }
         rows.into_any_element()
     }
@@ -1096,7 +1099,7 @@ impl Hakata {
                 div()
                     .text_size(px(11.5))
                     .text_color(theme.text_tertiary)
-                    .child(SharedString::from("Loading permissions…")),
+                    .child(tr_cow!("permissions.loading")),
             )
             .into_any_element()
     }
@@ -1127,7 +1130,7 @@ impl Hakata {
                     cx.stop_propagation();
                 }
             }))
-            .child(SharedString::from("Retry"));
+            .child(tr_cow!("common.retry"));
         div()
             .size_full()
             .flex()
@@ -1158,7 +1161,7 @@ fn menu_row<F>(
     theme: &Theme,
     id: SharedString,
     icon_path: &'static str,
-    label: &'static str,
+    label: String,
     action: F,
     cx: &mut Context<Hakata>,
 ) -> Stateful<Div>
@@ -1196,7 +1199,7 @@ where
                 .truncate()
                 .text_size(px(11.5))
                 .text_color(theme.text_secondary)
-                .child(SharedString::from(label)),
+                .child(label),
         )
 }
 
@@ -1205,7 +1208,7 @@ fn bulk_button(
     theme: &Theme,
     id: &'static str,
     icon_path: &'static str,
-    label: &'static str,
+    label: String,
     package: Option<SharedString>,
     grant: bool,
     cx: &mut Context<Hakata>,
@@ -1232,7 +1235,7 @@ fn bulk_button(
             div()
                 .text_size(px(11.0))
                 .text_color(theme.text_secondary)
-                .child(SharedString::from(label)),
+                .child(label),
         )
 }
 

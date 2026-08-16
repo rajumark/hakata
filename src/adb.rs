@@ -1,6 +1,8 @@
 use std::io::{Read, Write};
 use std::path::{Component, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 const DOWNLOAD_BASE: &str = "https://raw.githubusercontent.com/rajumark/adbcontent/main/";
 
 /// Best-practice app-data root for the current platform:
@@ -67,10 +69,10 @@ pub fn parse_adb_devices(output: &str) -> Vec<AdbDevice> {
 /// it is still attached and ready, otherwise fall back to the first ready
 /// device, otherwise none.
 pub fn resolve_default_device(current: Option<&str>, ready: &[&str]) -> Option<String> {
-    if let Some(current) = current {
-        if ready.contains(&current) {
-            return Some(current.to_string());
-        }
+    if let Some(current) = current
+        && ready.contains(&current)
+    {
+        return Some(current.to_string());
     }
     ready.first().map(|serial| (*serial).to_string())
 }
@@ -88,6 +90,56 @@ pub fn parse_packages(output: &str) -> Vec<String> {
     packages.sort();
     packages.dedup();
     packages
+}
+
+/// Which package set `adb shell pm list packages` returns.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum AppFilter {
+    All,
+    #[default]
+    User,
+    System,
+    Enabled,
+    Disabled,
+}
+
+impl AppFilter {
+    /// All filter variants, in display order.
+    pub const ALL: [Self; 5] = [Self::All, Self::User, Self::System, Self::Enabled, Self::Disabled];
+
+    pub fn label(self) -> String {
+        match self {
+            Self::All => tr!("apps.filter.all"),
+            Self::User => tr!("apps.filter.user"),
+            Self::System => tr!("apps.filter.system"),
+            Self::Enabled => tr!("apps.filter.enabled"),
+            Self::Disabled => tr!("apps.filter.disabled"),
+        }
+    }
+
+    /// Extra `pm list packages` flags for this filter.
+    pub fn adb_flag(self) -> &'static [&'static str] {
+        match self {
+            Self::All => &[],
+            Self::User => &["-3"],
+            Self::System => &["-s"],
+            Self::Enabled => &["-e"],
+            Self::Disabled => &["-d"],
+        }
+    }
+
+    /// Stable lower-case dashed id, e.g. `user-apps`, used for element ids.
+    /// Kept in English so ids never depend on the active locale.
+    pub fn slug(self) -> String {
+        match self {
+            Self::All => "all-apps",
+            Self::User => "user-apps",
+            Self::System => "system-apps",
+            Self::Enabled => "enabled-apps",
+            Self::Disabled => "disabled-apps",
+        }
+        .to_string()
+    }
 }
 
 fn platform_zip_name() -> &'static str {
@@ -279,5 +331,24 @@ mod tests {
     fn ignores_non_package_lines() {
         let output = "List of devices attached\npackage:com.example.app\n\nerror: no devices\n";
         assert_eq!(parse_packages(output), vec!["com.example.app"]);
+    }
+
+    #[test]
+    fn app_filter_maps_to_pm_flags() {
+        assert_eq!(AppFilter::All.adb_flag(), &[] as &[&str]);
+        assert_eq!(AppFilter::User.adb_flag(), &["-3"]);
+        assert_eq!(AppFilter::System.adb_flag(), &["-s"]);
+        assert_eq!(AppFilter::Enabled.adb_flag(), &["-e"]);
+        assert_eq!(AppFilter::Disabled.adb_flag(), &["-d"]);
+    }
+
+    #[test]
+    fn app_filter_labels_and_slugs() {
+        assert_eq!(&*rust_i18n::t!("apps.filter.all", locale = "en"), "All Apps");
+        assert_eq!(AppFilter::All.slug(), "all-apps");
+        assert_eq!(AppFilter::User.slug(), "user-apps");
+        assert_eq!(AppFilter::System.slug(), "system-apps");
+        assert_eq!(AppFilter::ALL.len(), 5);
+        assert_eq!(AppFilter::default(), AppFilter::User);
     }
 }

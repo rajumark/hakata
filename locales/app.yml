@@ -122,6 +122,18 @@ apps.no_matching:
   en: No matching apps
 apps.none:
   en: No apps found
+apps.filter_by:
+  en: Filter by
+apps.filter.all:
+  en: All Apps
+apps.filter.user:
+  en: User Apps
+apps.filter.system:
+  en: System Apps
+apps.filter.enabled:
+  en: Enabled Apps
+apps.filter.disabled:
+  en: Disabled Apps
 
 permissions.search_placeholder:
   en: Search permissions
@@ -141,6 +153,8 @@ permissions.granted:
   en: Granted
 permissions.denied:
   en: Denied
+permissions.unknown:
+  en: —
 permissions.no_runtime:
   en: No runtime permissions
 permissions.no_install:

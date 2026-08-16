@@ -14,11 +14,11 @@ pub enum ThemePreference {
 impl ThemePreference {
     pub const ALL: [Self; 3] = [Self::System, Self::Light, Self::Dark];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::System => "System",
-            Self::Light => "Light",
-            Self::Dark => "Dark",
+            Self::System => tr!("theme.system"),
+            Self::Light => tr!("theme.light"),
+            Self::Dark => tr!("theme.dark"),
         }
     }
 

@@ -32,9 +32,9 @@ impl Hakata {
         }
         let adb_path = crate::adb::adb_path();
         if !crate::adb::is_installed() {
-            self.adb_version = Some(AdbVersionStatus::Error(format!(
-                "adb not found at {}",
-                adb_path.display()
+            self.adb_version = Some(AdbVersionStatus::Error(tr!(
+                "debug.adb_not_found",
+                path = adb_path.display()
             )));
             cx.notify();
             return;
@@ -147,7 +147,7 @@ impl Hakata {
             .text_color(theme.text_secondary)
             .hover(|element| element.bg(theme.overlay))
             .child(icon("icons/copy.svg", 11.0, theme.text_tertiary))
-            .child(SharedString::from("Copy"))
+            .child(tr_cow!("debug.copy"))
             .on_click(cx.listener({
                 let path = adb_path_text.clone();
                 move |_, _, _, cx| {
@@ -176,7 +176,7 @@ impl Hakata {
             None => div()
                 .text_size(px(10.5))
                 .text_color(theme.text_ghost)
-                .child(SharedString::from("Not checked"))
+                .child(tr_cow!("debug.not_checked"))
                 .into_any_element(),
             Some(AdbVersionStatus::Checking) => div()
                 .flex()
@@ -199,9 +199,8 @@ impl Hakata {
                         )
                         .into_any_element(),
                 )
-                .child(SharedString::from("Checking…"))
-                .into_any_element(),
-            Some(AdbVersionStatus::Version(version)) => div()
+                .child(tr_cow!("debug.checking"))
+                .into_any_element(),            Some(AdbVersionStatus::Version(version)) => div()
                 .flex()
                 .items_center()
                 .gap(px(6.0))
@@ -225,12 +224,12 @@ impl Hakata {
                 .text_size(px(10.5))
                 .text_color(theme.text_secondary)
                 .child(icon("icons/smartphone.svg", 12.0, theme.text_secondary))
-                .child(SharedString::from(serial.clone()))
+                .child(serial.clone())
                 .into_any_element(),
             None => div()
                 .text_size(px(10.5))
                 .text_color(theme.text_ghost)
-                .child(SharedString::from("No device"))
+                .child(tr_cow!("device.no_device"))
                 .into_any_element(),
         };
 
@@ -242,12 +241,12 @@ impl Hakata {
             .overflow_hidden()
             .child(debug_info_row(
                 &theme,
-                "adb path",
+                &tr!("debug.adb_path"),
                 path_value.into_any_element(),
                 false,
             ))
-            .child(debug_info_row(&theme, "adb version", version_value, false))
-            .child(debug_info_row(&theme, "device", device_value, true));
+            .child(debug_info_row(&theme, &tr!("debug.adb_version"), version_value, false))
+            .child(debug_info_row(&theme, &tr!("debug.device"), device_value, true));
 
         div()
             .id("debug-page-scroll")
@@ -266,7 +265,7 @@ impl Hakata {
                             .text_size(px(18.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(SharedString::from("Debug")),
+                            .child(tr_cow!("debug.title")),
                     )
                     .child(card),
             )
@@ -301,7 +300,7 @@ impl Hakata {
                             .text_size(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
-                            .child(SharedString::from("Downloading adb")),
+                            .child(tr_cow!("debug.downloading")),
                     )
                     .child(div().flex_1())
                     .child(
@@ -343,13 +342,13 @@ impl Hakata {
                     .hover(|element| element.bg(theme.overlay))
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
                     .on_click(cx.listener(|this, _, _, cx| this.retry_adb_bootstrap(cx)))
-                    .child(SharedString::from("Retry"));
+                    .child(tr_cow!("common.retry"));
                 (
                     div()
                         .text_size(px(13.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text)
-                        .child(SharedString::from("Download failed")),
+                        .child(tr_cow!("debug.download_failed")),
                     div()
                         .flex()
                         .flex_col()
