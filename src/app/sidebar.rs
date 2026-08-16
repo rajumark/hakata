@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use gpui::{
-    AnyElement, Div, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement,
-    SharedString, Stateful, Styled, div, px, prelude::*,
+    Animation, AnimationExt, AnyElement, Div, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement, SharedString, Stateful, Styled, div, px, prelude::*,
 };
 
 use crate::theme::Theme;
@@ -250,15 +252,55 @@ impl Hakata {
             |theme, cx| {
                 if self.devices.is_empty() {
                     return div()
-                        .mx(px(4.0))
-                        .px(px(8.0))
-                        .min_h(px(26.0))
-                        .rounded(px(6.0))
-                        .flex()
-                        .items_center()
-                        .text_size(px(11.5))
-                        .text_color(theme.text_tertiary)
-                        .child(SharedString::from("No devices"));
+                        .child(
+                            div()
+                                .mx(px(4.0))
+                                .px(px(8.0))
+                                .min_h(px(26.0))
+                                .rounded(px(6.0))
+                                .flex()
+                                .items_center()
+                                .text_size(px(11.5))
+                                .text_color(theme.text_tertiary)
+                                .child(SharedString::from("No devices")),
+                        )
+                        .child(
+                            div()
+                                .id("device-menu-emulators")
+                                .mx(px(4.0))
+                                .px(px(8.0))
+                                .min_h(px(26.0))
+                                .rounded(px(6.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .cursor_default()
+                                .hover(|element| element.bg(theme.overlay))
+                                .child(icon(
+                                    "icons/terminal-square.svg",
+                                    12.0,
+                                    theme.text_secondary,
+                                ))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(px(11.5))
+                                        .text_color(theme.text_secondary)
+                                        .child(SharedString::from("Emulators")),
+                                )
+                                .child(icon(
+                                    "icons/chevron-right.svg",
+                                    11.0,
+                                    theme.text_tertiary,
+                                ))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| {
+                                        this.toggle_emulator_dialog(cx);
+                                    }),
+                                ),
+                        );
                 }
                 let mut card = div();
                 for device in &self.devices {
@@ -368,4 +410,309 @@ impl Hakata {
             .child(div().flex_1())
             .child(self.render_sidebar_footer(cx))
     }
+
+    // ── Emulators ────────────────────────────────────────────────────────
+
+    /// Open (or close) the emulator dialog. Detection starts lazily the first
+    /// time the dialog is opened.
+    pub(crate) fn toggle_emulator_dialog(&mut self, cx: &mut Context<Self>) {
+        self.emulator_dialog_open = !self.emulator_dialog_open;
+        if self.emulator_dialog_open {
+            self.device_menu_open = false;
+            if !self.emulators_loaded && !self.emulators_loading {
+                self.refresh_emulators(cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Re-run `emulator -list-avds` on the background executor. Guarded by a
+    /// generation counter so a stale result can't overwrite a newer one.
+    pub(crate) fn refresh_emulators(&mut self, cx: &mut Context<Self>) {
+        self.emulators_refresh_epoch += 1;
+        let epoch = self.emulators_refresh_epoch;
+        self.emulators_loading = true;
+        self.emulator_start_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::emulator::list_avds() })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.emulators_refresh_epoch != epoch {
+                    return;
+                }
+                this.emulators_loading = false;
+                this.emulators_loaded = true;
+                match result {
+                    Ok(avds) => {
+                        this.emulators = avds;
+                        this.emulators_error = None;
+                    }
+                    Err(error) => {
+                        this.emulators = Vec::new();
+                        this.emulators_error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Boot an AVD. The emulator window opens separately; once booted the
+    /// device shows up in `adb devices` and is picked up by the device
+    /// selector's periodic refresh.
+    pub(crate) fn launch_emulator(&mut self, name: &str, cx: &mut Context<Self>) {
+        self.emulator_launching = Some(name.to_string());
+        self.emulator_start_error = None;
+        cx.notify();
+        let name = name.to_string();
+        let name_for_spawn = name.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::emulator::start_avd(&name_for_spawn) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.emulator_launching.as_deref() == Some(name.as_str()) {
+                    this.emulator_launching = None;
+                }
+                if let Err(error) = result {
+                    this.emulator_start_error = Some(error.to_string());
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Centered scrim modal listing the AVDs on this machine, each with a
+    /// play button. Same chrome as the adb bootstrap modal.
+    pub(crate) fn render_emulators_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.emulator_dialog_open {
+            return None;
+        }
+        let theme = Theme::current(cx);
+
+        let close_button = div()
+            .id("emulators-dialog-close")
+            .tab_index(0)
+            .size(px(24.0))
+            .rounded(px(6.0))
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .child(icon("icons/x.svg", 13.0, theme.text_tertiary))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.emulator_dialog_open = false;
+                cx.notify();
+            }));
+
+        let title_row = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(px(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(SharedString::from("Emulators")),
+            )
+            .child(div().flex_1())
+            .child(close_button);
+
+        let mut body = div().flex().flex_col().gap(px(8.0));
+        if let Some(error) = &self.emulator_start_error {
+            body = body.child(
+                div()
+                    .w_full()
+                    .text_size(px(11.0))
+                    .line_height(px(16.0))
+                    .text_color(theme.danger)
+                    .child(SharedString::from(error.clone())),
+            );
+        }
+        body = body.child(self.render_emulators_list(cx));
+
+        let refresh_button = div()
+            .id("emulators-dialog-refresh")
+            .tab_index(0)
+            .cursor_default()
+            .h(px(28.0))
+            .px(px(14.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .text_size(px(11.5))
+            .text_color(theme.text_secondary)
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .child(icon("icons/refresh-cw.svg", 11.0, theme.text_tertiary))
+            .child(SharedString::from("Refresh"))
+            .on_click(cx.listener(|this, _, _, cx| this.refresh_emulators(cx)));
+
+        let card = div()
+            .w(px(380.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .border_1()
+            .border_color(theme.border)
+            .px(px(24.0))
+            .py(px(20.0))
+            .flex()
+            .flex_col()
+            .gap(px(14.0))
+            .child(title_row)
+            .child(body)
+            .child(div().flex().justify_end().child(refresh_button));
+
+        let scrim = if theme.is_dark {
+            gpui::hsla(0.0, 0.0, 0.0, 0.34)
+        } else {
+            gpui::hsla(0.0, 0.0, 0.0, 0.16)
+        };
+        let layer = div()
+            .id("emulators-dialog-layer")
+            .absolute()
+            .inset_0()
+            .occlude()
+            .bg(scrim)
+            .p(px(24.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(card);
+        Some(gpui::deferred(layer).with_priority(4).into_any_element())
+    }
+
+    fn render_emulators_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        if self.emulators_loading && !self.emulators_loaded {
+            return div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(px(11.0))
+                .text_color(theme.text_tertiary)
+                .child(emulator_spinner(
+                    SharedString::from("emulators-detect-spinner"),
+                    &theme,
+                ))
+                .child(SharedString::from("Detecting emulators…"))
+                .into_any_element();
+        }
+        if let Some(error) = &self.emulators_error {
+            return div()
+                .w_full()
+                .text_size(px(11.0))
+                .line_height(px(16.0))
+                .text_color(theme.danger)
+                .child(SharedString::from(error.clone()))
+                .into_any_element();
+        }
+        if self.emulators.is_empty() {
+            return div()
+                .w_full()
+                .text_size(px(11.0))
+                .line_height(px(16.0))
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(
+                    "No emulators found. Create one with Android Studio or avdmanager.",
+                ))
+                .into_any_element();
+        }
+        let mut list = div()
+            .id("emulators-dialog-list")
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .max_h(px(320.0))
+            .overflow_y_scroll();
+        for name in &self.emulators {
+            let name = name.clone();
+            let launching = self.emulator_launching.as_deref() == Some(name.as_str());
+            let play = if launching {
+                div()
+                    .id(SharedString::from(format!("emulator-launch-spinner-{}", name)))
+                    .size(px(24.0))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .child(emulator_spinner(
+                        SharedString::from(format!("emulator-launch-spinner-{}", name)),
+                        &theme,
+                    ))
+            } else {
+                div()
+                    .id(SharedString::from(format!("emulator-play-{}", name)))
+                    .tab_index(0)
+                    .size(px(24.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .hover(|element| element.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .child(icon("icons/play.svg", 12.0, theme.accent))
+                    .on_click(cx.listener({
+                        let name = name.clone();
+                        move |this, _, _, cx| this.launch_emulator(&name, cx)
+                    }))
+            };
+            list = list.child(
+                div()
+                    .id(SharedString::from(format!("emulator-row-{}", name)))
+                    .h(px(30.0))
+                    .px(px(8.0))
+                    .rounded(px(7.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(12.0))
+                            .text_color(theme.text)
+                            .child(SharedString::from(name.clone())),
+                    )
+                    .child(play),
+            );
+        }
+        list.into_any_element()
+    }
+}
+
+/// A repeating rotation spinner, one per element (animation ids must be
+/// unique).
+fn emulator_spinner(animation_id: SharedString, theme: &Theme) -> AnyElement {
+    icon("icons/loader-circle.svg", 12.0, theme.text_tertiary)
+        .with_animation(
+            animation_id,
+            Animation::new(Duration::from_millis(900))
+                .repeat()
+                .with_easing(gpui::linear),
+            |icon, delta| {
+                icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(delta)))
+            },
+        )
+        .into_any_element()
 }

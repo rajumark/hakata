@@ -1,13 +1,41 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, Context, InteractiveElement, IntoElement,
-    KeyDownEvent, ParentElement, SharedString, Styled, Window, div, px, prelude::*,
+    actions, Animation, AnimationExt, AnyElement, App, ClipboardItem, Context,
+    InteractiveElement, IntoElement, KeyBinding, KeyDownEvent, MouseButton, ParentElement,
+    SharedString, Styled, Window, div, px, prelude::*,
 };
 
 use crate::theme::Theme;
 
-use super::{Hakata, PanelResizeSide, PanelResizeTarget, icon};
+use super::{Hakata, PanelResizeSide, PanelResizeTarget, icon, package_info};
+
+actions!(apps_title, [CopyPackageTitle]);
+
+/// Bind the title row's copy key. Called once at startup.
+pub fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("cmd-c", CopyPackageTitle, Some("AppsTitle"))]);
+}
+
+/// The sub-tabs shown on the Apps detail pane.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AppsTab {
+    Overview,
+    Permissions,
+    Files,
+}
+
+impl AppsTab {
+    pub(crate) const ALL: [Self; 3] = [Self::Overview, Self::Permissions, Self::Files];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Permissions => "Permissions",
+            Self::Files => "Files",
+        }
+    }
+}
 
 impl Hakata {
     /// Fetch third-party packages for the selected device on the background
@@ -94,7 +122,91 @@ impl Hakata {
         .detach();
     }
 
-    /// The packages the search query leaves visible, matched case-insensitively.
+    /// Fetch `adb -s <device> shell dumpsys package <pkg>` for the selected
+    /// package and stash the raw output on the entity. The dump is kept until
+    /// a different package (or device) is selected; parsing happens on demand
+    /// per tab. A generation counter drops a superseded result.
+    pub(crate) fn fetch_package_dump(&mut self, cx: &mut Context<Self>) {
+        let Some(serial) = self.selected_device.clone() else {
+            self.package_dump_raw = None;
+            self.package_dump_loading = false;
+            self.package_dump_error = None;
+            cx.notify();
+            return;
+        };
+        let Some(package) = self.selected_package.clone() else {
+            self.package_dump_raw = None;
+            self.package_dump_loading = false;
+            self.package_dump_error = None;
+            cx.notify();
+            return;
+        };
+        if self.package_dump_device.as_deref() == Some(serial.as_str())
+            && self.package_dump_package.as_deref() == Some(package.as_str())
+            && self.package_dump_raw.is_some()
+        {
+            return;
+        }
+        let adb_path = crate::adb::adb_path();
+        if !crate::adb::is_installed() {
+            self.package_dump_raw = None;
+            self.package_dump_loading = false;
+            self.package_dump_error = None;
+            cx.notify();
+            return;
+        }
+        self.package_dump_epoch += 1;
+        let epoch = self.package_dump_epoch;
+        let serial_for_spawn = serial.clone();
+        let package_for_spawn = package.clone();
+        self.package_dump_loading = true;
+        self.package_dump_device = Some(serial);
+        self.package_dump_package = Some(package);
+        self.package_dump_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    std::process::Command::new(&adb_path)
+                        .arg("-s")
+                        .arg(serial_for_spawn.as_str())
+                        .arg("shell")
+                        .arg("dumpsys")
+                        .arg("package")
+                        .arg(package_for_spawn.as_str())
+                        .output()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.package_dump_epoch != epoch {
+                    return;
+                }
+                this.package_dump_loading = false;
+                match result {
+                    Ok(output) if output.status.success() => {
+                        this.package_dump_raw = Some(SharedString::from(
+                            String::from_utf8_lossy(&output.stdout),
+                        ));
+                        this.package_dump_error = None;
+                    }
+                    Ok(output) => {
+                        this.package_dump_raw = None;
+                        this.package_dump_error = Some(
+                            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                        );
+                    }
+                    Err(error) => {
+                        this.package_dump_raw = None;
+                        this.package_dump_error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn filtered_packages(&self, cx: &App) -> Vec<SharedString> {
         let query = self.apps_search.read(cx).content().trim().to_lowercase();
         if query.is_empty() {
@@ -110,16 +222,29 @@ impl Hakata {
     pub(crate) fn render_apps_page(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let panel_width = self.effective_apps_panel_width(window);
+        let has_selection = self.selected_package.is_some();
 
         let left_panel = div()
-            .w(px(panel_width))
             .h_full()
-            .flex_none()
             .relative()
             .flex()
             .flex_col()
             .px(px(12.0))
             .py(px(10.0))
+            .when(has_selection, |element| {
+                element
+                    .w(px(panel_width))
+                    .flex_none()
+                    .border_r_1()
+                    .border_color(theme.sidebar_border)
+                    .child(self.render_panel_resize_handle(
+                        "apps-resize-handle",
+                        PanelResizeTarget::Apps,
+                        PanelResizeSide::Right,
+                        cx,
+                    ))
+            })
+            .when(!has_selection, |element| element.flex_1())
             .child(self.render_apps_search(window, cx))
             .child(div().h(px(8.0)))
             .child(
@@ -128,31 +253,330 @@ impl Hakata {
                     .min_h_0()
                     .relative()
                     .child(self.render_apps_list(cx)),
+            );
+
+        let tab_bar = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .py(px(2.0))
+            .children(AppsTab::ALL.iter().map(|tab| {
+                let selected = self.selected_apps_tab == *tab;
+                div()
+                    .id(SharedString::from(format!("apps-tab-{}", tab.label().to_lowercase())))
+                    .px(px(10.0))
+                    .h(px(26.0))
+                    .flex_none()
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .cursor_default()
+                    .when(selected, |element| element.bg(theme.overlay))
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .text_size(px(12.0))
+                    .text_color(if selected {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    })
+                    .child(SharedString::from(tab.label()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.selected_apps_tab != *tab {
+                            this.selected_apps_tab = *tab;
+                            cx.notify();
+                        }
+                    }))
+            }));
+
+        let title_row = div()
+            .id("apps-title")
+            .group("apps-title-row")
+            .flex_none()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .key_context("AppsTitle")
+            .track_focus(&self.apps_title_focus)
+            .tab_index(0)
+            .on_action(cx.listener(|this, _: &CopyPackageTitle, _, cx| {
+                if let Some(package) = this.selected_package.clone() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(package.to_string()));
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    window.focus(&this.apps_title_focus, cx);
+                    if !this.title_selected {
+                        this.title_selected = true;
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }),
             )
-            .child(self.render_panel_resize_handle(
-                "apps-resize-handle",
-                PanelResizeTarget::Apps,
-                PanelResizeSide::Right,
-                cx,
-            ));
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                if this.title_selected {
+                    this.title_selected = false;
+                    cx.notify();
+                }
+            }))
+            .child(
+                div()
+                    .flex_none()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(15.0))
+                    .text_color(theme.text)
+                    .when(self.title_selected, |element| {
+                        element.rounded(px(4.0)).bg(theme.overlay_strong)
+                    })
+                    .child(self.selected_package.clone().unwrap_or_else(|| {
+                        SharedString::from("No app selected")
+                    })),
+            )
+            .child(
+                div()
+                    .id("apps-title-copy")
+                    .tab_index(0)
+                    .size(px(22.0))
+                    .flex_none()
+                    .rounded(px(5.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .opacity(0.0)
+                    .group_hover("apps-title-row", |element| element.opacity(1.0))
+                    .focus_visible(|style| style.bg(theme.overlay))
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .child(icon("icons/copy.svg", 12.0, theme.text_tertiary))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(package) = this.selected_package.clone() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(
+                                package.to_string(),
+                            ));
+                        }
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            if let Some(package) = this.selected_package.clone() {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    package.to_string(),
+                                ));
+                            }
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
 
         let right_panel = div()
             .flex_1()
             .h_full()
             .min_w_0()
             .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(13.0))
-            .text_color(theme.text_ghost)
-            .child(SharedString::from("Coming soon"));
+            .flex_col()
+            .pt(px(14.0))
+            .px(px(16.0))
+            .child(title_row)
+            .child(div().h(px(6.0)))
+            .child(tab_bar)
+            .child(div().h(px(10.0)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(self.render_apps_tab_content(cx)),
+            );
 
         div()
             .id("apps-page")
             .size_full()
             .flex()
+            .border_t_1()
+            .border_color(theme.sidebar_border)
             .child(left_panel)
-            .child(right_panel)
+            .when(has_selection, |element| element.child(right_panel))
+            .into_any_element()
+    }
+
+    /// The body for the selected Apps detail tab. Overview shows the parsed
+    /// `dumpsys` facts; the other tabs are placeholders for now.
+    fn render_apps_tab_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        match self.selected_apps_tab {
+            AppsTab::Overview => self.render_overview_tab(cx),
+            tab => self.render_tab_placeholder(tab, cx),
+        }
+    }
+
+    fn render_tab_placeholder(&self, tab: AppsTab, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .text_size(px(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(tab.label())),
+            )
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(theme.text_ghost)
+                    .child(SharedString::from("coming soon")),
+            )
+            .into_any_element()
+    }
+
+    /// Basic information about the selected package, parsed from the cached
+    /// `dumpsys package` dump. Returns `None` while loading or when the dump
+    /// is missing.
+    fn parsed_package_info(&self) -> Option<package_info::PackageInfo> {
+        self.package_dump_raw
+            .as_deref()
+            .map(package_info::parse_package_info)
+    }
+
+    fn render_overview_tab(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        if self.package_dump_loading {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    icon("icons/loader-circle.svg", 14.0, theme.text_tertiary).with_animation(
+                        SharedString::from("apps-overview-loading-spinner"),
+                        Animation::new(Duration::from_millis(900))
+                            .repeat()
+                            .with_easing(gpui::linear),
+                        |icon, delta| {
+                            icon.with_transformation(gpui::Transformation::rotate(
+                                gpui::percentage(delta),
+                            ))
+                        },
+                    ),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(SharedString::from("Loading package info…")),
+                )
+                .into_any_element();
+        }
+        if let Some(error) = &self.package_dump_error {
+            return self.render_overview_center(theme.text_ghost, error.clone(), cx);
+        }
+        let Some(info) = self.parsed_package_info() else {
+            return self.render_overview_center(theme.text_ghost, "No package info".into(), cx);
+        };
+
+        let fields: Vec<(&'static str, String)> = vec![
+            ("Version name", info.version_name.unwrap_or_default()),
+            ("Version code", info.version_code.unwrap_or_default()),
+            ("Target SDK", info.target_sdk.unwrap_or_default()),
+            ("Min SDK", info.min_sdk.unwrap_or_default()),
+            ("UID", info.uid.unwrap_or_default()),
+            (
+                "First install",
+                info.first_install_time.unwrap_or_default(),
+            ),
+            ("Last update", info.last_update_time.unwrap_or_default()),
+            ("Data dir", info.data_dir.unwrap_or_default()),
+            ("Code path", info.code_path.unwrap_or_default()),
+            (
+                "Flags",
+                if info.flags.is_empty() {
+                    String::new()
+                } else {
+                    info.flags.join(", ")
+                },
+            ),
+        ];
+
+        let mut rows = div().flex().flex_col();
+        for (label, value) in fields {
+            let value = if value.is_empty() {
+                "—".to_string()
+            } else {
+                value
+            };
+            rows = rows.child(
+                div()
+                    .flex()
+                    .items_baseline()
+                    .gap(px(12.0))
+                    .py(px(3.0))
+                    .child(
+                        div()
+                            .w(px(96.0))
+                            .flex_none()
+                            .text_size(px(11.5))
+                            .text_color(theme.text_tertiary)
+                            .truncate()
+                            .child(SharedString::from(label)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(11.5))
+                            .text_color(theme.text)
+                            .child(SharedString::from(value)),
+                    ),
+            );
+        }
+
+        div()
+            .id("apps-overview")
+            .size_full()
+            .overflow_y_scroll()
+            .py(px(8.0))
+            .child(rows)
+            .into_any_element()
+    }
+
+    fn render_overview_center(
+        &self,
+        color: gpui::Hsla,
+        message: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let _ = cx;
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(16.0))
+            .child(
+                div()
+                    .text_size(px(11.5))
+                    .text_color(color)
+                    .child(SharedString::from(message)),
+            )
             .into_any_element()
     }
 
@@ -263,6 +687,7 @@ impl Hakata {
 
         let mut rows = div().flex().flex_col().gap(px(2.0));
         for package in &packages {
+            let selected = self.selected_package.as_deref() == Some(package.as_str());
             rows = rows.child(
                 div()
                     .id(SharedString::from(format!("apps-package-{}", package)))
@@ -274,7 +699,17 @@ impl Hakata {
                     .items_center()
                     .gap(px(8.0))
                     .cursor_default()
+                    .when(selected, |element| element.bg(theme.sidebar_item_background))
                     .hover(|element| element.bg(theme.overlay))
+                    .on_click(cx.listener({
+                        let package = package.clone();
+                        move |this, _, _, cx| {
+                            this.selected_package = Some(package.clone());
+                            this.title_selected = false;
+                            this.fetch_package_dump(cx);
+                            cx.notify();
+                        }
+                    }))
                     .child(
                         div()
                             .size(px(14.0))
@@ -282,7 +717,15 @@ impl Hakata {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(icon("icons/apps.svg", 12.0, theme.text_ghost)),
+                            .child(icon(
+                                "icons/apps.svg",
+                                12.0,
+                                if selected {
+                                    theme.text_secondary
+                                } else {
+                                    theme.text_ghost
+                                },
+                            )),
                     )
                     .child(
                         div()
@@ -290,7 +733,11 @@ impl Hakata {
                             .min_w_0()
                             .truncate()
                             .text_size(px(11.5))
-                            .text_color(theme.text_secondary)
+                            .text_color(if selected {
+                                theme.text
+                            } else {
+                                theme.text_secondary
+                            })
                             .child(package.clone()),
                     ),
             );

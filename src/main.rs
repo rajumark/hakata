@@ -6,6 +6,7 @@ use gpui::{
 mod adb;
 mod app;
 mod assets;
+mod emulator;
 mod input;
 mod settings;
 mod theme;
@@ -25,6 +26,7 @@ fn main() {
             cx.set_app_identity(APP_ID, APP_NAME);
             theme::set_theme_preference(theme_preference, cx);
             input::init(cx);
+            app::apps::init(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
 
             cx.bind_keys([
@@ -65,6 +67,8 @@ fn main() {
                     |_window, cx| Hakata::new(cx),
                 )
                 .expect("failed to open Hakata window");
+
+            cx.activate(true);
 
             cx.on_action({
                 let window = window.clone();

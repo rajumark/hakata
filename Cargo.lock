@@ -2440,6 +2440,7 @@ dependencies = [
  "dirs",
  "gpui",
  "gpui_platform",
+ "libc",
  "serde",
  "serde_json",
  "smol",

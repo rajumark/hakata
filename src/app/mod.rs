@@ -14,6 +14,7 @@ use crate::theme::{Theme, ThemePreference};
 
 pub mod apps;
 pub mod debug;
+pub mod package_info;
 pub mod settings;
 pub mod sidebar;
 
@@ -121,7 +122,25 @@ pub struct Hakata {
     pub(crate) packages_device: Option<SharedString>,
     pub(crate) packages_error: Option<String>,
     pub(crate) packages_refresh_epoch: usize,
+    pub(crate) selected_package: Option<SharedString>,
+    pub(crate) selected_apps_tab: apps::AppsTab,
+    pub(crate) apps_title_focus: FocusHandle,
+    pub(crate) title_selected: bool,
+    pub(crate) package_dump_device: Option<SharedString>,
+    pub(crate) package_dump_package: Option<SharedString>,
+    pub(crate) package_dump_raw: Option<SharedString>,
+    pub(crate) package_dump_loading: bool,
+    pub(crate) package_dump_error: Option<String>,
+    pub(crate) package_dump_epoch: usize,
     pub(crate) apps_panel_width: f32,
+    pub(crate) emulator_dialog_open: bool,
+    pub(crate) emulators: Vec<String>,
+    pub(crate) emulators_loaded: bool,
+    pub(crate) emulators_loading: bool,
+    pub(crate) emulators_error: Option<String>,
+    pub(crate) emulators_refresh_epoch: usize,
+    pub(crate) emulator_launching: Option<String>,
+    pub(crate) emulator_start_error: Option<String>,
 }
 
 impl Hakata {
@@ -160,7 +179,25 @@ impl Hakata {
                 packages_device: None,
                 packages_error: None,
                 packages_refresh_epoch: 0,
+                selected_package: None,
+                selected_apps_tab: apps::AppsTab::Overview,
+                apps_title_focus: cx.focus_handle(),
+                title_selected: false,
+                package_dump_device: None,
+                package_dump_package: None,
+                package_dump_raw: None,
+                package_dump_loading: false,
+                package_dump_error: None,
+                package_dump_epoch: 0,
                 apps_panel_width: 0.0,
+                emulator_dialog_open: false,
+                emulators: Vec::new(),
+                emulators_loaded: false,
+                emulators_loading: false,
+                emulators_error: None,
+                emulators_refresh_epoch: 0,
+                emulator_launching: None,
+                emulator_start_error: None,
             }
         })
     }
@@ -196,6 +233,7 @@ impl Hakata {
         }
         if page == MenuPage::Apps {
             self.refresh_packages(false, cx);
+            self.fetch_package_dump(cx);
             window.focus(&self.apps_search.read(cx).focus(), cx);
         }
         cx.notify();
@@ -529,6 +567,7 @@ impl Hakata {
         self.devices = devices;
         if self.selected_page == MenuPage::Apps {
             self.refresh_packages(false, cx);
+            self.fetch_package_dump(cx);
         }
         cx.notify();
     }
@@ -550,6 +589,7 @@ impl Hakata {
         self.device_menu_open = false;
         if self.selected_page == MenuPage::Apps {
             self.refresh_packages(false, cx);
+            self.fetch_package_dump(cx);
         }
         cx.notify();
     }
@@ -793,6 +833,11 @@ impl Render for Hakata {
             .into_any_element();
         let root = div().size_full().relative().child(content);
         let root = if let Some(modal) = self.render_adb_bootstrap_modal(cx) {
+            root.child(modal)
+        } else {
+            root
+        };
+        let root = if let Some(modal) = self.render_emulators_dialog(cx) {
             root.child(modal)
         } else {
             root
