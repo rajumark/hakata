@@ -12,9 +12,14 @@ use gpui::{
 use crate::input::{SearchField, SearchFieldEvent};
 use crate::theme::{Theme, ThemePreference};
 
+pub mod app_actions;
 pub mod apps;
 pub mod debug;
 pub mod package_info;
+pub mod paths;
+pub mod permissions;
+pub mod preferences;
+pub mod quick_panel;
 pub mod settings;
 pub mod sidebar;
 
@@ -42,6 +47,7 @@ pub(crate) enum MenuPage {
     Apps,
     Settings,
     Debug,
+    Preferences,
 }
 
 impl MenuPage {
@@ -60,6 +66,7 @@ impl MenuPage {
             Self::Apps => "Apps",
             Self::Settings => "Settings",
             Self::Debug => "Debug",
+            Self::Preferences => "Preferences",
         }
     }
 
@@ -70,6 +77,7 @@ impl MenuPage {
             Self::Apps => "icons/apps.svg",
             Self::Settings => "icons/settings.svg",
             Self::Debug => "icons/terminal-square.svg",
+            Self::Preferences => "icons/settings.svg",
         }
     }
 }
@@ -113,6 +121,10 @@ pub struct Hakata {
     pub(crate) theme_menu_open: bool,
     pub(crate) theme_trigger_focus: FocusHandle,
     pub(crate) theme_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    pub(crate) selected_preferences_page: preferences::PreferencesPage,
+    pub(crate) language_menu_open: bool,
+    pub(crate) language_trigger_focus: FocusHandle,
+    pub(crate) language_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     pub(crate) appearance_observed: bool,
     pub(crate) apps_search: Entity<SearchField>,
     pub(crate) _apps_search_subscription: Subscription,
@@ -141,6 +153,21 @@ pub struct Hakata {
     pub(crate) emulators_refresh_epoch: usize,
     pub(crate) emulator_launching: Option<String>,
     pub(crate) emulator_start_error: Option<String>,
+    pub(crate) package_context_menu: Option<app_actions::PackageContextMenu>,
+    pub(crate) confirm_request: Option<app_actions::ConfirmationRequest>,
+    pub(crate) permission_run: Option<app_actions::PermissionRun>,
+    pub(crate) app_action_status: Option<app_actions::AppActionStatus>,
+    pub(crate) app_action_epoch: usize,
+    pub(crate) permissions: Vec<SharedString>,
+    pub(crate) permissions_state: permissions::PermissionsState,
+    pub(crate) permissions_search: Entity<SearchField>,
+    pub(crate) _permissions_search_subscription: Subscription,
+    pub(crate) permissions_menu_open: bool,
+    pub(crate) permissions_menu_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    pub(crate) paths: paths::PathsState,
+    pub(crate) pinned_apps: Vec<SharedString>,
+    pub(crate) tap_menu_open: bool,
+    pub(crate) tap_menu_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
 }
 
 impl Hakata {
@@ -149,6 +176,12 @@ impl Hakata {
             let apps_search = cx.new(|cx| SearchField::new(cx).placeholder("Search apps"));
             let _apps_search_subscription =
                 cx.subscribe(&apps_search, |_, _, _: &SearchFieldEvent, cx| {
+                    cx.notify();
+                });
+            let permissions_search =
+                cx.new(|cx| SearchField::new(cx).placeholder("Search permissions"));
+            let _permissions_search_subscription =
+                cx.subscribe(&permissions_search, |_, _, _: &SearchFieldEvent, cx| {
                     cx.notify();
                 });
             Self {
@@ -170,6 +203,10 @@ impl Hakata {
                 theme_menu_open: false,
                 theme_trigger_focus: cx.focus_handle(),
                 theme_trigger_bounds: Rc::new(Cell::new(None)),
+                selected_preferences_page: preferences::PreferencesPage::Theme,
+                language_menu_open: false,
+                language_trigger_focus: cx.focus_handle(),
+                language_trigger_bounds: Rc::new(Cell::new(None)),
                 appearance_observed: false,
                 apps_search,
                 _apps_search_subscription,
@@ -198,6 +235,25 @@ impl Hakata {
                 emulators_refresh_epoch: 0,
                 emulator_launching: None,
                 emulator_start_error: None,
+                package_context_menu: None,
+                confirm_request: None,
+                permission_run: None,
+                app_action_status: None,
+                app_action_epoch: 0,
+                permissions: Vec::new(),
+                permissions_state: permissions::PermissionsState::default(),
+                permissions_search,
+                _permissions_search_subscription,
+                permissions_menu_open: false,
+                permissions_menu_bounds: Rc::new(Cell::new(None)),
+                paths: paths::PathsState::default(),
+                pinned_apps: crate::settings::load()
+                    .pinned_apps
+                    .into_iter()
+                    .map(SharedString::from)
+                    .collect(),
+                tap_menu_open: false,
+                tap_menu_bounds: Rc::new(Cell::new(None)),
             }
         })
     }
@@ -233,7 +289,7 @@ impl Hakata {
         }
         if page == MenuPage::Apps {
             self.refresh_packages(false, cx);
-            self.fetch_package_dump(cx);
+            self.fetch_package_dump(false, cx);
             window.focus(&self.apps_search.read(cx).focus(), cx);
         }
         cx.notify();
@@ -567,7 +623,7 @@ impl Hakata {
         self.devices = devices;
         if self.selected_page == MenuPage::Apps {
             self.refresh_packages(false, cx);
-            self.fetch_package_dump(cx);
+            self.fetch_package_dump(false, cx);
         }
         cx.notify();
     }
@@ -589,7 +645,7 @@ impl Hakata {
         self.device_menu_open = false;
         if self.selected_page == MenuPage::Apps {
             self.refresh_packages(false, cx);
-            self.fetch_package_dump(cx);
+            self.fetch_package_dump(false, cx);
         }
         cx.notify();
     }
@@ -618,7 +674,10 @@ impl Hakata {
         }
         self.theme_preference = preference;
         crate::theme::set_theme_preference(preference, cx);
-        let _ = crate::settings::save(&crate::settings::Settings { theme: preference });
+        let _ = crate::settings::save(&crate::settings::Settings {
+            theme: preference,
+            pinned_apps: self.pinned_apps.iter().map(|p| p.to_string()).collect(),
+        });
         self.theme_menu_open = false;
         cx.notify();
     }
@@ -736,6 +795,7 @@ impl Hakata {
             MenuPage::Debug => self.render_debug_page(cx),
             MenuPage::Settings => self.render_settings_page(cx),
             MenuPage::Apps => self.render_apps_page(window, cx),
+            MenuPage::Preferences => self.render_preferences_page(cx),
             page => {
                 let theme = Theme::current(cx);
                 div()
@@ -830,6 +890,9 @@ impl Render for Hakata {
                         ))
                     }),
             )
+            .when(self.selected_device.is_some(), |root| {
+                root.child(self.render_quick_panel(cx))
+            })
             .into_any_element();
         let root = div().size_full().relative().child(content);
         let root = if let Some(modal) = self.render_adb_bootstrap_modal(cx) {
@@ -839,6 +902,21 @@ impl Render for Hakata {
         };
         let root = if let Some(modal) = self.render_emulators_dialog(cx) {
             root.child(modal)
+        } else {
+            root
+        };
+        let root = if let Some(menu) = self.render_package_context_menu(cx) {
+            root.child(menu)
+        } else {
+            root
+        };
+        let root = if let Some(dialog) = self.render_confirmation_dialog(cx) {
+            root.child(dialog)
+        } else {
+            root
+        };
+        let root = if let Some(dialog) = self.render_permissions_run_dialog(cx) {
+            root.child(dialog)
         } else {
             root
         };

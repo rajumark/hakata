@@ -79,6 +79,40 @@ fn remainder_after<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     line.find(key).map(|start| line[start + key.len()..].trim())
 }
 
+/// The permission names in the `requested permissions:` block of a
+/// `dumpsys package` dump. Lines marked `(platform)` are filtered out and the
+/// block ends at the next section header or a blank line.
+pub fn parse_requested_permissions(dump: &str) -> Vec<String> {
+    let mut permissions = Vec::new();
+    let mut in_block = false;
+    for line in dump.lines() {
+        let trimmed = line.trim();
+        if !in_block {
+            if trimmed == "requested permissions:" {
+                in_block = true;
+            }
+            continue;
+        }
+        if trimmed.ends_with(':') {
+            break;
+        }
+        if trimmed.is_empty() {
+            if !permissions.is_empty() {
+                break;
+            }
+            continue;
+        }
+        if trimmed.starts_with('#') || trimmed.contains("(platform)") {
+            continue;
+        }
+        let name = trimmed.split_whitespace().next().unwrap_or("");
+        if !name.is_empty() && !permissions.iter().any(|p| p == name) {
+            permissions.push(name.to_string());
+        }
+    }
+    permissions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,5 +172,31 @@ mod tests {
         let info = parse_package_info("  uid=10001\n  versionName=1.0\n");
         assert_eq!(info.uid.as_deref(), Some("10001"));
         assert_eq!(info.version_name.as_deref(), Some("1.0"));
+    }
+
+    #[test]
+    fn parses_requested_permissions_block() {
+        let dump = r#"Package [com.example.app] (abcdef):
+      requested permissions:
+        android.permission.INTERNET
+        android.permission.ACCESS_NETWORK_STATE
+        com.example.permission.DYNAMIC (platform)
+      install permissions:
+        android.permission.INTERNET: granted=true
+    "#;
+        assert_eq!(
+            parse_requested_permissions(dump),
+            vec![
+                "android.permission.INTERNET",
+                "android.permission.ACCESS_NETWORK_STATE",
+            ]
+        );
+    }
+
+    #[test]
+    fn requested_permissions_missing_is_empty() {
+        assert!(parse_requested_permissions("no block here").is_empty());
+        assert!(parse_requested_permissions("").is_empty());
+        assert!(parse_requested_permissions("  requested permissions:\n").is_empty());
     }
 }

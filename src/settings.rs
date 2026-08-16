@@ -8,6 +8,7 @@ use crate::theme::ThemePreference;
 #[serde(default)]
 pub struct Settings {
     pub theme: ThemePreference,
+    pub pinned_apps: Vec<String>,
 }
 
 fn settings_path() -> std::path::PathBuf {
@@ -39,10 +40,14 @@ mod tests {
     #[test]
     fn round_trips_theme_preference() {
         for preference in ThemePreference::ALL {
-            let settings = Settings { theme: preference };
+            let settings = Settings {
+                theme: preference,
+                pinned_apps: vec!["com.example.one".into(), "com.example.two".into()],
+            };
             let json = serde_json::to_string(&settings).unwrap();
             let restored: Settings = serde_json::from_str(&json).unwrap();
             assert_eq!(restored.theme, preference);
+            assert_eq!(restored.pinned_apps.len(), 2);
         }
     }
 
@@ -50,5 +55,13 @@ mod tests {
     fn defaults_when_corrupt() {
         let restored: Settings = serde_json::from_str("not json").unwrap_or_default();
         assert_eq!(restored.theme, ThemePreference::System);
+        assert!(restored.pinned_apps.is_empty());
+    }
+
+    #[test]
+    fn missing_fields_default() {
+        let restored: Settings = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(restored.theme, ThemePreference::Dark);
+        assert!(restored.pinned_apps.is_empty());
     }
 }

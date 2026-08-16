@@ -22,16 +22,18 @@ pub fn init(cx: &mut App) {
 pub(crate) enum AppsTab {
     Overview,
     Permissions,
+    Paths,
     Files,
 }
 
 impl AppsTab {
-    pub(crate) const ALL: [Self; 3] = [Self::Overview, Self::Permissions, Self::Files];
+    pub(crate) const ALL: [Self; 4] = [Self::Overview, Self::Permissions, Self::Paths, Self::Files];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Overview => "Overview",
             Self::Permissions => "Permissions",
+            Self::Paths => "Paths",
             Self::Files => "Files",
         }
     }
@@ -125,12 +127,21 @@ impl Hakata {
     /// Fetch `adb -s <device> shell dumpsys package <pkg>` for the selected
     /// package and stash the raw output on the entity. The dump is kept until
     /// a different package (or device) is selected; parsing happens on demand
-    /// per tab. A generation counter drops a superseded result.
-    pub(crate) fn fetch_package_dump(&mut self, cx: &mut Context<Self>) {
+    /// per tab. `force` bypasses the cache guard so actions that change
+    /// package state (enable/disable/clear-data/grant) always re-read. A
+    /// generation counter drops a superseded result.
+    pub(crate) fn fetch_package_dump(
+        &mut self,
+        force: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.fetch_package_paths(false, cx);
         let Some(serial) = self.selected_device.clone() else {
             self.package_dump_raw = None;
             self.package_dump_loading = false;
             self.package_dump_error = None;
+            self.permissions.clear();
+            self.reset_permissions_state();
             cx.notify();
             return;
         };
@@ -138,10 +149,13 @@ impl Hakata {
             self.package_dump_raw = None;
             self.package_dump_loading = false;
             self.package_dump_error = None;
+            self.permissions.clear();
+            self.reset_permissions_state();
             cx.notify();
             return;
         };
-        if self.package_dump_device.as_deref() == Some(serial.as_str())
+        if !force
+            && self.package_dump_device.as_deref() == Some(serial.as_str())
             && self.package_dump_package.as_deref() == Some(package.as_str())
             && self.package_dump_raw.is_some()
         {
@@ -152,6 +166,8 @@ impl Hakata {
             self.package_dump_raw = None;
             self.package_dump_loading = false;
             self.package_dump_error = None;
+            self.permissions.clear();
+            self.reset_permissions_state();
             cx.notify();
             return;
         }
@@ -185,9 +201,13 @@ impl Hakata {
                 this.package_dump_loading = false;
                 match result {
                     Ok(output) if output.status.success() => {
-                        this.package_dump_raw = Some(SharedString::from(
-                            String::from_utf8_lossy(&output.stdout),
-                        ));
+                        let raw = SharedString::from(String::from_utf8_lossy(&output.stdout));
+                        this.package_dump_raw = Some(raw.clone());
+                        this.permissions = package_info::parse_requested_permissions(&raw)
+                            .into_iter()
+                            .map(SharedString::from)
+                            .collect();
+                        this.parse_permissions_into_state(&raw);
                         this.package_dump_error = None;
                     }
                     Ok(output) => {
@@ -398,25 +418,35 @@ impl Hakata {
                     .relative()
                     .border_t_1()
                     .border_color(theme.border)
-                    .child(self.render_apps_tab_content(cx)),
+                    .child(self.render_apps_tab_content(window, cx)),
             );
 
         div()
             .id("apps-page")
             .size_full()
             .flex()
+            .flex_col()
             .border_t_1()
             .border_color(theme.sidebar_border)
-            .child(left_panel)
-            .when(has_selection, |element| element.child(right_panel))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .child(left_panel)
+                    .when(has_selection, |element| element.child(right_panel)),
+            )
+            .child(self.render_action_status(cx))
             .into_any_element()
     }
 
     /// The body for the selected Apps detail tab. Overview shows the parsed
     /// `dumpsys` facts; the other tabs are placeholders for now.
-    fn render_apps_tab_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_apps_tab_content(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         match self.selected_apps_tab {
             AppsTab::Overview => self.render_overview_tab(cx),
+            AppsTab::Permissions => self.render_permissions_tab(window, cx),
+            AppsTab::Paths => self.render_paths_tab(cx),
             tab => self.render_tab_placeholder(tab, cx),
         }
     }
@@ -685,62 +715,30 @@ impl Hakata {
             return self.render_apps_empty_state(cx);
         }
 
+        let pinned: Vec<&SharedString> = packages
+            .iter()
+            .filter(|package| self.pinned_apps.contains(package))
+            .collect();
+        let unpinned: Vec<&SharedString> = packages
+            .iter()
+            .filter(|package| !self.pinned_apps.contains(package))
+            .collect();
+
         let mut rows = div().flex().flex_col().gap(px(2.0));
-        for package in &packages {
-            let selected = self.selected_package.as_deref() == Some(package.as_str());
-            rows = rows.child(
-                div()
-                    .id(SharedString::from(format!("apps-package-{}", package)))
-                    .h(px(28.0))
-                    .flex_none()
-                    .px(px(8.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .cursor_default()
-                    .when(selected, |element| element.bg(theme.sidebar_item_background))
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener({
-                        let package = package.clone();
-                        move |this, _, _, cx| {
-                            this.selected_package = Some(package.clone());
-                            this.title_selected = false;
-                            this.fetch_package_dump(cx);
-                            cx.notify();
-                        }
-                    }))
-                    .child(
-                        div()
-                            .size(px(14.0))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(icon(
-                                "icons/apps.svg",
-                                12.0,
-                                if selected {
-                                    theme.text_secondary
-                                } else {
-                                    theme.text_ghost
-                                },
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(11.5))
-                            .text_color(if selected {
-                                theme.text
-                            } else {
-                                theme.text_secondary
-                            })
-                            .child(package.clone()),
-                    ),
-            );
+        if !pinned.is_empty() {
+            rows = rows.child(section_header(&theme, "Pinned"));
+            for package in &pinned {
+                rows = rows.child(self.render_package_row((*package).clone(), cx));
+            }
+            rows = rows.child(div().h(px(6.0)));
+        }
+        if !unpinned.is_empty() {
+            if !pinned.is_empty() {
+                rows = rows.child(section_header(&theme, "All Apps"));
+            }
+            for package in &unpinned {
+                rows = rows.child(self.render_package_row((*package).clone(), cx));
+            }
         }
 
         div()
@@ -749,6 +747,77 @@ impl Hakata {
             .overflow_y_scroll()
             .px(px(2.0))
             .child(rows)
+            .into_any_element()
+    }
+
+    /// One package row: select on left-click, context menu on right-click, and
+    /// a pin indicator when pinned.
+    fn render_package_row(&self, package: SharedString, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let selected = self.selected_package.as_deref() == Some(package.as_str());
+        let pinned = self.pinned_apps.contains(&package);
+        div()
+            .id(SharedString::from(format!("apps-package-{}", package)))
+            .h(px(28.0))
+            .flex_none()
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_default()
+            .when(selected, |element| element.bg(theme.sidebar_item_background))
+            .hover(|element| element.bg(theme.overlay))
+            .on_click(cx.listener({
+                let package = package.clone();
+                move |this, _, _, cx| {
+                    this.select_package(package.clone(), cx);
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener({
+                    let package = package.clone();
+                    move |this, event: &gpui::MouseDownEvent, _, cx| {
+                        this.select_package(package.clone(), cx);
+                        this.open_package_context_menu(package.clone(), event.position, cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
+            .child(
+                div()
+                    .size(px(14.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon(
+                        "icons/apps.svg",
+                        12.0,
+                        if selected {
+                            theme.text_secondary
+                        } else {
+                            theme.text_ghost
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(11.5))
+                    .text_color(if selected {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    })
+                    .child(package.clone()),
+            )
+            .when(pinned, |element| {
+                element.child(icon("icons/pin.svg", 10.0, theme.text_ghost))
+            })
             .into_any_element()
     }
 
@@ -806,4 +875,17 @@ impl Hakata {
             )
             .into_any_element()
     }
+}
+
+/// A small uppercase section heading used to separate pinned apps from the
+/// rest of the list.
+fn section_header(theme: &Theme, label: &'static str) -> AnyElement {
+    div()
+        .px(px(8.0))
+        .pt(px(6.0))
+        .pb(px(2.0))
+        .text_size(px(10.0))
+        .text_color(theme.text_tertiary)
+        .child(SharedString::from(label))
+        .into_any_element()
 }

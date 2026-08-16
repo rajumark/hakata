@@ -186,9 +186,31 @@ impl Hakata {
             .px(px(10.0))
             .flex()
             .items_center()
-            .text_size(px(11.0))
-            .text_color(theme.text_ghost)
-            .child("Hakata")
+            .child(
+                div()
+                    .id("sidebar-preferences")
+                    .tab_index(0)
+                    .size(px(26.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .child(icon("icons/settings.svg", 14.0, theme.text_tertiary))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.select_page(MenuPage::Preferences, window, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.select_page(MenuPage::Preferences, window, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+            .child(div().flex_1())
     }
 
     /// The sidebar's device picker. Shows the selected device (or a hint to

@@ -46,7 +46,7 @@ impl Hakata {
     }
 
     /// The appearance dropdown on the Settings page.
-    fn render_theme_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_theme_selector(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let trigger = self
             .render_trigger(
