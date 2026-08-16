@@ -74,6 +74,7 @@ pub struct Theme {
     pub sidebar_item_background: Hsla,
     pub surface: Hsla,
     pub raised: Hsla,
+    pub inset: Hsla,
     pub overlay: Hsla,
     pub overlay_strong: Hsla,
     pub sidebar_border: Hsla,
@@ -107,6 +108,7 @@ impl Theme {
             sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
             surface: rgb(0x1A1A1A).into(),
             raised: rgb(0x232323).into(),
+            inset: rgb(0x151515).into(),
             overlay: hsla(220.0 / 360.0, 0.10, 0.90, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.90, 0.09),
             sidebar_border: hsla(126.93 / 360.0, 0.000_000_1, 0.16077, 1.0),
@@ -131,6 +133,7 @@ impl Theme {
             sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
             surface: rgb(0xF6F5F6).into(),
             raised: rgb(0xECECEC).into(),
+            inset: rgb(0xE6E6E6).into(),
             overlay: hsla(220.0 / 360.0, 0.10, 0.12, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.12, 0.09),
             sidebar_border: hsla(0.0, 0.0, 0.078, 0.12),
@@ -168,5 +171,16 @@ mod tests {
         assert!(Theme::dark().is_dark);
         assert!(!Theme::light().is_dark);
         assert_ne!(Theme::dark().sidebar, Theme::light().sidebar);
+    }
+
+    /// The search field's sunken background must differ from both the surface
+    /// it sits on and the raised cards beside it.
+    #[test]
+    fn inset_is_distinct_in_both_themes() {
+        for theme in [Theme::dark(), Theme::light()] {
+            assert_ne!(theme.inset, theme.surface);
+            assert_ne!(theme.inset, theme.raised);
+            assert_eq!(theme.inset.a, 1.0);
+        }
     }
 }

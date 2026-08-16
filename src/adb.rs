@@ -75,6 +75,21 @@ pub fn resolve_default_device(current: Option<&str>, ready: &[&str]) -> Option<S
     ready.first().map(|serial| (*serial).to_string())
 }
 
+/// Parse `adb shell pm list packages` output (`package:com.example.app`
+/// lines) into sorted, de-duplicated package names.
+pub fn parse_packages(output: &str) -> Vec<String> {
+    let mut packages: Vec<String> = output
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| line.strip_prefix("package:").map(str::trim))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect();
+    packages.sort();
+    packages.dedup();
+    packages
+}
+
 fn platform_zip_name() -> &'static str {
     if cfg!(target_os = "macos") {
         "platform-tools-macos.zip"
@@ -249,5 +264,20 @@ mod tests {
     fn default_device_is_none_without_ready_devices() {
         assert_eq!(resolve_default_device(Some("emulator-5554"), &[]), None);
         assert_eq!(resolve_default_device(None, &[]), None);
+    }
+
+    #[test]
+    fn parses_package_lines_into_sorted_unique_names() {
+        let output = "package:com.example.beta\npackage:com.example.alpha\npackage:com.example.alpha\n";
+        assert_eq!(
+            parse_packages(output),
+            vec!["com.example.alpha", "com.example.beta"]
+        );
+    }
+
+    #[test]
+    fn ignores_non_package_lines() {
+        let output = "List of devices attached\npackage:com.example.app\n\nerror: no devices\n";
+        assert_eq!(parse_packages(output), vec!["com.example.app"]);
     }
 }

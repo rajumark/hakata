@@ -6,6 +6,7 @@ use gpui::{
 mod adb;
 mod app;
 mod assets;
+mod input;
 mod settings;
 mod theme;
 
@@ -23,6 +24,7 @@ fn main() {
         .run(move |cx: &mut App| {
             cx.set_app_identity(APP_ID, APP_NAME);
             theme::set_theme_preference(theme_preference, cx);
+            input::init(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
 
             cx.bind_keys([

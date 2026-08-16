@@ -6,10 +6,11 @@ use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, App, Bounds, ClipboardItem, Context,
     DefiniteLength, Div, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
-    Point, Render, SharedString, Stateful, Styled, Svg, Window, anchored, canvas, deferred, div,
-    prelude::*, px,
+    Point, Render, SharedString, Stateful, Styled, Subscription, Svg, Window, anchored, canvas,
+    deferred, div, prelude::*, px,
 };
 
+use crate::input::{SearchField, SearchFieldEvent};
 use crate::theme::{Theme, ThemePreference};
 
 #[cfg(target_os = "macos")]
@@ -24,23 +25,36 @@ const MAIN_PANEL_MIN_WIDTH: f32 = 360.0;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
 const TITLEBAR_HEIGHT: f32 = 48.0;
 const FOOTER_HEIGHT: f32 = 40.0;
+/// The Apps list panel starts at 30% of the viewport and never goes below a
+/// usable width or past 60%.
+const APPS_PANEL_MIN_WIDTH: f32 = 200.0;
+const APPS_PANEL_FRACTION: f32 = 0.30;
+const APPS_PANEL_MAX_FRACTION: f32 = 0.60;
 
-/// The three sidebar menus. Each shows a page in the main area.
+/// The four sidebar menus. Each shows a page in the main area.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuPage {
     NewTask,
     Search,
+    Apps,
     Settings,
     Debug,
 }
 
 impl MenuPage {
-    const ALL: [Self; 4] = [Self::NewTask, Self::Search, Self::Settings, Self::Debug];
+    const ALL: [Self; 5] = [
+        Self::NewTask,
+        Self::Search,
+        Self::Apps,
+        Self::Settings,
+        Self::Debug,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Self::NewTask => "New Task",
             Self::Search => "Search",
+            Self::Apps => "Apps",
             Self::Settings => "Settings",
             Self::Debug => "Debug",
         }
@@ -50,14 +64,29 @@ impl MenuPage {
         match self {
             Self::NewTask => "icons/compose.svg",
             Self::Search => "icons/search.svg",
+            Self::Apps => "icons/apps.svg",
             Self::Settings => "icons/settings.svg",
             Self::Debug => "icons/terminal-square.svg",
         }
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PanelResizeTarget {
+    Sidebar,
+    Apps,
+}
+
+/// Which edge of its parent pane a resize strip straddles.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PanelResizeSide {
+    Left,
+    Right,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct PanelResizeDrag {
+    target: PanelResizeTarget,
     start_mouse_x: f32,
     start_width: f32,
 }
@@ -99,30 +128,55 @@ pub struct Hakata {
     theme_trigger_focus: FocusHandle,
     theme_trigger_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     appearance_observed: bool,
+    apps_search: Entity<SearchField>,
+    _apps_search_subscription: Subscription,
+    packages: Vec<SharedString>,
+    packages_loading: bool,
+    packages_loaded: bool,
+    packages_device: Option<SharedString>,
+    packages_error: Option<String>,
+    packages_refresh_epoch: usize,
+    apps_panel_width: f32,
 }
 
 impl Hakata {
     pub fn new(cx: &mut App) -> Entity<Self> {
-        cx.new(|cx| Self {
-            selected_page: MenuPage::NewTask,
-            sidebar_visible: true,
-            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
-            panel_resize_drag: None,
-            header_drag_armed: false,
-            toggle_focus: cx.focus_handle(),
-            adb_version: None,
-            adb_bootstrap: None,
-            device_refresh_started: false,
-            devices: Vec::new(),
-            selected_device: None,
-            device_menu_open: false,
-            device_trigger_focus: cx.focus_handle(),
-            device_trigger_bounds: Rc::new(Cell::new(None)),
-            theme_preference: crate::theme::theme_preference(cx),
-            theme_menu_open: false,
-            theme_trigger_focus: cx.focus_handle(),
-            theme_trigger_bounds: Rc::new(Cell::new(None)),
-            appearance_observed: false,
+        cx.new(|cx| {
+            let apps_search = cx.new(|cx| SearchField::new(cx).placeholder("Search apps"));
+            let _apps_search_subscription =
+                cx.subscribe(&apps_search, |_, _, _: &SearchFieldEvent, cx| {
+                    cx.notify();
+                });
+            Self {
+                selected_page: MenuPage::NewTask,
+                sidebar_visible: true,
+                sidebar_width: SIDEBAR_DEFAULT_WIDTH,
+                panel_resize_drag: None,
+                header_drag_armed: false,
+                toggle_focus: cx.focus_handle(),
+                adb_version: None,
+                adb_bootstrap: None,
+                device_refresh_started: false,
+                devices: Vec::new(),
+                selected_device: None,
+                device_menu_open: false,
+                device_trigger_focus: cx.focus_handle(),
+                device_trigger_bounds: Rc::new(Cell::new(None)),
+                theme_preference: crate::theme::theme_preference(cx),
+                theme_menu_open: false,
+                theme_trigger_focus: cx.focus_handle(),
+                theme_trigger_bounds: Rc::new(Cell::new(None)),
+                appearance_observed: false,
+                apps_search,
+                _apps_search_subscription,
+                packages: Vec::new(),
+                packages_loading: false,
+                packages_loaded: false,
+                packages_device: None,
+                packages_error: None,
+                packages_refresh_epoch: 0,
+                apps_panel_width: 0.0,
+            }
         })
     }
 
@@ -139,12 +193,27 @@ impl Hakata {
         )
     }
 
-    fn select_page(&mut self, page: MenuPage, cx: &mut Context<Self>) {
+    fn select_page(&mut self, page: MenuPage, window: &mut Window, cx: &mut Context<Self>) {
         self.selected_page = page;
         if page == MenuPage::Debug {
             self.check_adb_version(cx);
         }
+        if page == MenuPage::Apps {
+            self.refresh_packages(false, cx);
+            window.focus(&self.apps_search.read(cx).focus(), cx);
+        }
         cx.notify();
+    }
+
+    fn effective_apps_panel_width(&self, window: &Window) -> f32 {
+        let viewport_width = f32::from(window.viewport_size().width);
+        let default = viewport_width * APPS_PANEL_FRACTION;
+        let base = if self.apps_panel_width > 0.0 {
+            self.apps_panel_width
+        } else {
+            default
+        };
+        base.clamp(APPS_PANEL_MIN_WIDTH, viewport_width * APPS_PANEL_MAX_FRACTION)
     }
 
     /// Probe `adb version` on the background executor the first time the Debug
@@ -227,6 +296,9 @@ impl Hakata {
                         if this.selected_page == MenuPage::Debug {
                             this.check_adb_version(cx);
                         }
+                        if this.selected_page == MenuPage::Apps {
+                            this.refresh_packages(false, cx);
+                        }
                         AdbBootstrapState::Done
                     }
                     Err(error) => AdbBootstrapState::Error(error.to_string()),
@@ -294,6 +366,9 @@ impl Hakata {
         let next = crate::adb::resolve_default_device(self.selected_device.as_deref(), &ready);
         self.selected_device = next.map(SharedString::from);
         self.devices = devices;
+        if self.selected_page == MenuPage::Apps {
+            self.refresh_packages(false, cx);
+        }
         cx.notify();
     }
 
@@ -312,7 +387,109 @@ impl Hakata {
     fn select_device(&mut self, serial: &str, cx: &mut Context<Self>) {
         self.selected_device = Some(SharedString::from(serial));
         self.device_menu_open = false;
+        if self.selected_page == MenuPage::Apps {
+            self.refresh_packages(false, cx);
+        }
         cx.notify();
+    }
+
+    // ── Apps packages ─────────────────────────────────────────────────────
+
+    /// Fetch third-party packages for the selected device on the background
+    /// executor. `force` bypasses the "already fresh for this device" guard so
+    /// the refresh button always hits adb. A generation counter drops results
+    /// from a superseded run (device switched mid-flight).
+    fn refresh_packages(&mut self, force: bool, cx: &mut Context<Self>) {
+        let Some(serial) = self.selected_device.clone() else {
+            self.packages.clear();
+            self.packages_loading = false;
+            self.packages_loaded = false;
+            self.packages_device = None;
+            self.packages_error = None;
+            cx.notify();
+            return;
+        };
+        if !force
+            && self.packages_device.as_deref() == Some(serial.as_str())
+            && self.packages_loaded
+        {
+            return;
+        }
+        let adb_path = crate::adb::adb_path();
+        if !crate::adb::is_installed() {
+            self.packages.clear();
+            self.packages_loading = false;
+            self.packages_loaded = false;
+            self.packages_device = Some(serial);
+            self.packages_error = None;
+            cx.notify();
+            return;
+        }
+        self.packages_refresh_epoch += 1;
+        let epoch = self.packages_refresh_epoch;
+        let serial_for_spawn = serial.clone();
+        self.packages_loading = true;
+        self.packages_device = Some(serial);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    std::process::Command::new(&adb_path)
+                        .arg("-s")
+                        .arg(serial_for_spawn.as_str())
+                        .arg("shell")
+                        .arg("pm")
+                        .arg("list")
+                        .arg("packages")
+                        .arg("-3")
+                        .output()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.packages_refresh_epoch != epoch {
+                    return;
+                }
+                this.packages_loading = false;
+                this.packages_loaded = true;
+                this.packages_error = None;
+                match result {
+                    Ok(output) if output.status.success() => {
+                        this.packages = crate::adb::parse_packages(
+                            &String::from_utf8_lossy(&output.stdout),
+                        )
+                        .into_iter()
+                        .map(SharedString::from)
+                        .collect();
+                    }
+                    Ok(output) => {
+                        this.packages.clear();
+                        this.packages_error = Some(
+                            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                        );
+                    }
+                    Err(error) => {
+                        this.packages.clear();
+                        this.packages_error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The packages the search query leaves visible, matched case-insensitively.
+    fn filtered_packages(&self, cx: &App) -> Vec<SharedString> {
+        let query = self.apps_search.read(cx).content().trim().to_lowercase();
+        if query.is_empty() {
+            return self.packages.clone();
+        }
+        self.packages
+            .iter()
+            .filter(|package| package.to_lowercase().contains(&query))
+            .cloned()
+            .collect()
     }
 
     // ── Theme preference ─────────────────────────────────────────────────
@@ -539,12 +716,12 @@ impl Hakata {
                     })
                     .child(page.label()),
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.select_page(page, cx);
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.select_page(page, window, cx);
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.select_page(page, cx);
+                    this.select_page(page, window, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -936,53 +1113,91 @@ impl Hakata {
 
     // ── Panel resize ──────────────────────────────────────────────────────
 
-    fn render_panel_resize_handle(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// The draggable divider between two panes. `side` says which edge of the
+    /// parent pane the strip straddles: the sidebar divider hangs off the
+    /// content column's left edge, the Apps divider off the list panel's right
+    /// edge.
+    fn render_panel_resize_handle(
+        &self,
+        id: &'static str,
+        target: PanelResizeTarget,
+        side: PanelResizeSide,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let active = self.panel_resize_drag.is_some();
-        let strip_left = -5.0;
-        let strip_width = 10.0;
+        let active = self.panel_resize_drag.is_some_and(|drag| drag.target == target);
+        let line = match side {
+            PanelResizeSide::Left => div()
+                .absolute()
+                .top_0()
+                .h_full()
+                .w(px(2.0))
+                .rounded(px(1.0))
+                .left(px(5.0))
+                .bg(if active {
+                    theme.resize_handle
+                } else {
+                    gpui::transparent_black()
+                })
+                .group_hover("panel-resize-handle", |element| {
+                    element.bg(theme.resize_handle)
+                }),
+            PanelResizeSide::Right => div()
+                .absolute()
+                .top_0()
+                .h_full()
+                .w(px(2.0))
+                .rounded(px(1.0))
+                .right(px(5.0))
+                .bg(if active {
+                    theme.resize_handle
+                } else {
+                    gpui::transparent_black()
+                })
+                .group_hover("panel-resize-handle", |element| {
+                    element.bg(theme.resize_handle)
+                }),
+        };
         div()
-            .id("sidebar-resize-handle")
+            .id(id)
             .absolute()
             .top_0()
-            .left(px(strip_left))
-            .w(px(strip_width))
+            .w(px(10.0))
             .h_full()
             .group("panel-resize-handle")
             .cursor_col_resize()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(px(5.0))
-                    .w(px(2.0))
-                    .h_full()
-                    .bg(if active {
-                        theme.resize_handle
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .group_hover("panel-resize-handle", |element| {
-                        element.bg(theme.resize_handle)
-                    }),
-            )
+            .when(side == PanelResizeSide::Left, |element| {
+                element.left(px(-5.0))
+            })
+            .when(side == PanelResizeSide::Right, |element| {
+                element.right(px(-5.0))
+            })
+            .child(line)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event, window, cx| {
-                    this.begin_panel_resize(event, window, cx);
+                    this.begin_panel_resize(target, event, window, cx);
                 }),
             )
     }
 
     fn begin_panel_resize(
         &mut self,
+        target: PanelResizeTarget,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let start_width = self.effective_sidebar_width(window);
-        self.sidebar_width = start_width;
+        let start_width = match target {
+            PanelResizeTarget::Sidebar => self.effective_sidebar_width(window),
+            PanelResizeTarget::Apps => {
+                let start = self.effective_apps_panel_width(window);
+                self.apps_panel_width = start;
+                start
+            }
+        };
         self.panel_resize_drag = Some(PanelResizeDrag {
+            target,
             start_mouse_x: f32::from(event.position.x),
             start_width,
         });
@@ -1001,14 +1216,25 @@ impl Hakata {
         };
         let viewport_width = f32::from(window.viewport_size().width);
         let delta = f32::from(event.position.x) - drag.start_mouse_x;
-        let maximum = SIDEBAR_MAX_WIDTH
-            .min(viewport_width - MAIN_PANEL_MIN_WIDTH)
-            .max(SIDEBAR_MIN_WIDTH);
-        let width = (drag.start_width + delta).clamp(SIDEBAR_MIN_WIDTH, maximum);
-        if (self.sidebar_width - width).abs() < 0.5 {
+        let width = match drag.target {
+            PanelResizeTarget::Sidebar => {
+                let maximum = SIDEBAR_MAX_WIDTH
+                    .min(viewport_width - MAIN_PANEL_MIN_WIDTH)
+                    .max(SIDEBAR_MIN_WIDTH);
+                (drag.start_width + delta).clamp(SIDEBAR_MIN_WIDTH, maximum)
+            }
+            PanelResizeTarget::Apps => {
+                (drag.start_width + delta).clamp(APPS_PANEL_MIN_WIDTH, viewport_width * APPS_PANEL_MAX_FRACTION)
+            }
+        };
+        let field = match drag.target {
+            PanelResizeTarget::Sidebar => &mut self.sidebar_width,
+            PanelResizeTarget::Apps => &mut self.apps_panel_width,
+        };
+        if (*field - width).abs() < 0.5 {
             return;
         }
-        self.sidebar_width = width;
+        *field = width;
         cx.notify();
     }
 
@@ -1025,10 +1251,11 @@ impl Hakata {
 
     // ── Pages ─────────────────────────────────────────────────────────────
 
-    fn render_page(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_page(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         match self.selected_page {
             MenuPage::Debug => self.render_debug_page(cx),
             MenuPage::Settings => self.render_settings_page(cx),
+            MenuPage::Apps => self.render_apps_page(window, cx),
             page => {
                 let theme = Theme::current(cx);
                 div()
@@ -1049,6 +1276,261 @@ impl Hakata {
                     .into_any_element()
             }
         }
+    }
+
+    // ── Apps page ─────────────────────────────────────────────────────────
+
+    fn render_apps_page(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let panel_width = self.effective_apps_panel_width(window);
+
+        let left_panel = div()
+            .w(px(panel_width))
+            .h_full()
+            .flex_none()
+            .relative()
+            .flex()
+            .flex_col()
+            .px(px(12.0))
+            .py(px(10.0))
+            .child(self.render_apps_search(window, cx))
+            .child(div().h(px(8.0)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .relative()
+                    .child(self.render_apps_list(cx)),
+            )
+            .child(self.render_panel_resize_handle(
+                "apps-resize-handle",
+                PanelResizeTarget::Apps,
+                PanelResizeSide::Right,
+                cx,
+            ));
+
+        let right_panel = div()
+            .flex_1()
+            .h_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(13.0))
+            .text_color(theme.text_ghost)
+            .child(SharedString::from("Coming soon"));
+
+        div()
+            .id("apps-page")
+            .size_full()
+            .flex()
+            .child(left_panel)
+            .child(right_panel)
+            .into_any_element()
+    }
+
+    /// The Apps search box: a Waku-style one-line field with a leading search
+    /// icon, accent border while focused, on a sunken inset background. A
+    /// clear (×) affordance appears once there is something to clear, and a
+    /// refresh button re-probes adb on demand.
+    fn render_apps_search(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let focused = self.apps_search.read(cx).is_visually_focused(window);
+        let has_content = !self.apps_search.read(cx).is_empty();
+
+        let refresh = div()
+            .id("apps-refresh")
+            .tab_index(0)
+            .focus_visible(|style| style.bg(theme.overlay))
+            .size(px(18.0))
+            .flex_none()
+            .rounded(px(5.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_default()
+            .opacity(if self.packages_loading { 0.6 } else { 1.0 })
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .child(icon("icons/refresh-cw.svg", 12.0, theme.text_ghost))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.refresh_packages(true, cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.refresh_packages(true, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        let mut shell = div()
+            .id("apps-search")
+            .h(px(28.0))
+            .flex_none()
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(if focused {
+                theme.accent
+            } else {
+                theme.border_strong
+            })
+            .bg(theme.inset)
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(11.5))
+            .line_height(px(16.0))
+            .child(icon("icons/search.svg", 13.0, theme.text_tertiary))
+            .child(div().min_w_0().flex_1().child(self.apps_search.clone()));
+
+        if has_content {
+            shell = shell.child(
+                div()
+                    .id("apps-search-clear")
+                    .tab_index(0)
+                    .focus_visible(|style| style.bg(theme.overlay))
+                    .size(px(18.0))
+                    .flex_none()
+                    .rounded(px(5.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .child(icon("icons/x.svg", 11.0, theme.text_ghost))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let field = this.apps_search.clone();
+                        field.update(cx, |field, cx| {
+                            field.set_content("", cx);
+                            field.select_range(0..0, cx);
+                        });
+                        window.focus(&field.read(cx).focus(), cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            let field = this.apps_search.clone();
+                            field.update(cx, |field, cx| {
+                                field.set_content("", cx);
+                                field.select_range(0..0, cx);
+                            });
+                            window.focus(&field.read(cx).focus(), cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
+        }
+
+        shell = shell.child(refresh);
+        shell.into_any_element()
+    }
+
+    fn render_apps_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let packages = self.filtered_packages(cx);
+
+        if packages.is_empty() {
+            return self.render_apps_empty_state(cx);
+        }
+
+        let mut rows = div().flex().flex_col().gap(px(2.0));
+        for package in &packages {
+            rows = rows.child(
+                div()
+                    .id(SharedString::from(format!("apps-package-{}", package)))
+                    .h(px(28.0))
+                    .flex_none()
+                    .px(px(8.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .cursor_default()
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(
+                        div()
+                            .size(px(14.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("icons/apps.svg", 12.0, theme.text_ghost)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(11.5))
+                            .text_color(theme.text_secondary)
+                            .child(package.clone()),
+                    ),
+            );
+        }
+
+        div()
+            .id("apps-list-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .px(px(2.0))
+            .child(rows)
+            .into_any_element()
+    }
+
+    fn render_apps_empty_state(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let has_query = !self.apps_search.read(cx).is_empty();
+        let message = if self.selected_device.is_none() {
+            "No device selected".to_string()
+        } else if self.packages_loading {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(8.0))
+                .child(
+                    icon("icons/loader-circle.svg", 14.0, theme.text_tertiary).with_animation(
+                        SharedString::from("apps-loading-spinner"),
+                        Animation::new(Duration::from_millis(900))
+                            .repeat()
+                            .with_easing(gpui::linear),
+                        |icon, delta| {
+                            icon.with_transformation(gpui::Transformation::rotate(
+                                gpui::percentage(delta),
+                            ))
+                        },
+                    ),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(SharedString::from("Loading apps…")),
+                )
+                .into_any_element();
+        } else if let Some(error) = &self.packages_error {
+            error.clone()
+        } else if has_query {
+            "No matching apps".to_string()
+        } else {
+            "No apps found".to_string()
+        };
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(16.0))
+            .child(
+                div()
+                    .text_size(px(11.5))
+                    .text_color(theme.text_ghost)
+                    .child(SharedString::from(message)),
+            )
+            .into_any_element()
     }
 
     fn render_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1548,10 +2030,15 @@ impl Render for Hakata {
                             .flex_1()
                             .min_h_0()
                             .relative()
-                            .child(self.render_page(cx)),
+                            .child(self.render_page(window, cx)),
                     )
                     .when(self.sidebar_visible, |element| {
-                        element.child(self.render_panel_resize_handle(cx))
+                        element.child(self.render_panel_resize_handle(
+                            "sidebar-resize-handle",
+                            PanelResizeTarget::Sidebar,
+                            PanelResizeSide::Left,
+                            cx,
+                        ))
                     }),
             )
             .into_any_element();
