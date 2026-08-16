@@ -8,6 +8,7 @@ description = "A tiny GPUI desktop app with a single centered button"
 anyhow = "1.0"
 dirs = "6.0"
 libc = "0.2"
+rust-i18n = "4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 smol = "2"

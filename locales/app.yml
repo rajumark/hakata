@@ -1,0 +1,383 @@
+_version: 2
+
+common.coming_soon:
+  en: coming soon
+common.no_device_selected:
+  en: No device selected
+common.retry:
+  en: Retry
+common.refresh:
+  en: Refresh
+common.copy:
+  en: Copy
+
+page.new_task:
+  en: New Task
+page.search:
+  en: Search
+page.apps:
+  en: Apps
+page.settings:
+  en: Settings
+page.debug:
+  en: Debug
+page.preferences:
+  en: Preferences
+page.coming_soon:
+  en: "%{page} coming soon"
+
+theme.system:
+  en: System
+theme.light:
+  en: Light
+theme.dark:
+  en: Dark
+
+language.title:
+  en: Language
+language.description:
+  en: Choose the language used in the interface.
+language.system:
+  en: System
+
+settings.appearance:
+  en: APPEARANCE
+settings.theme:
+  en: Theme
+
+preferences.header:
+  en: PREFERENCES
+preferences.section.theme:
+  en: Theme
+preferences.section.alerts:
+  en: Alerts
+preferences.section.shortcut:
+  en: Shortcut
+preferences.section.about:
+  en: About
+preferences.theme:
+  en: Theme
+preferences.theme_description:
+  en: Choose how the app looks and matches your system.
+
+device.no_device:
+  en: No device
+device.no_devices:
+  en: No devices
+device.emulators:
+  en: Emulators
+
+emulators.title:
+  en: Emulators
+emulators.detecting:
+  en: Detecting emulators…
+emulators.none:
+  en: No emulators found. Create one with Android Studio or avdmanager.
+emulators.binary_not_found:
+  en: Android SDK emulator binary not found
+
+apps.search_placeholder:
+  en: Search apps
+apps.tab.overview:
+  en: Overview
+apps.tab.permissions:
+  en: Permissions
+apps.tab.paths:
+  en: Paths
+apps.tab.files:
+  en: Files
+apps.no_app_selected:
+  en: No app selected
+apps.loading_package_info:
+  en: Loading package info…
+apps.no_package_info:
+  en: No package info
+apps.version_name:
+  en: Version name
+apps.version_code:
+  en: Version code
+apps.target_sdk:
+  en: Target SDK
+apps.min_sdk:
+  en: Min SDK
+apps.uid:
+  en: UID
+apps.first_install:
+  en: First install
+apps.last_update:
+  en: Last update
+apps.data_dir:
+  en: Data dir
+apps.code_path:
+  en: Code path
+apps.flags:
+  en: Flags
+apps.list.pinned:
+  en: Pinned
+apps.list.all:
+  en: All Apps
+apps.loading:
+  en: Loading apps…
+apps.no_matching:
+  en: No matching apps
+apps.none:
+  en: No apps found
+
+permissions.search_placeholder:
+  en: Search permissions
+permissions.segment.runtime:
+  en: Runtime
+permissions.segment.install:
+  en: Install
+permissions.segment.declared:
+  en: Declared
+permissions.segment.requested:
+  en: Requested
+permissions.grant_all:
+  en: Grant all
+permissions.revoke_all:
+  en: Revoke all
+permissions.granted:
+  en: Granted
+permissions.denied:
+  en: Denied
+permissions.no_runtime:
+  en: No runtime permissions
+permissions.no_install:
+  en: No install permissions
+permissions.no_declared:
+  en: No declared permissions
+permissions.no_requested:
+  en: No requested permissions
+permissions.loading:
+  en: Loading permissions…
+permissions.app_info:
+  en: App Info
+permissions.special_access:
+  en: Special App Access
+permissions.special.overlay:
+  en: Display Over Other Apps
+permissions.special.accessibility:
+  en: Accessibility Services
+permissions.special.default_apps:
+  en: Default Apps
+permissions.special.write_settings:
+  en: Modify System Settings
+permissions.special.usage_access:
+  en: Usage Access
+permissions.special.notification_access:
+  en: Notification Access
+permissions.special.all_files_access:
+  en: All Files Access
+permissions.special.install_unknown:
+  en: Install Unknown Apps
+permissions.special.do_not_disturb:
+  en: Do Not Disturb Access
+permissions.opened_settings:
+  en: Opened settings
+permissions.open_settings_failed:
+  en: Failed to open settings
+permissions.opened_app_info:
+  en: Opened App Info for %{package}
+permissions.open_app_info_failed:
+  en: Failed to open App Info
+permissions.grant_failed:
+  en: Failed to grant %{name}
+permissions.revoke_failed:
+  en: Failed to revoke %{name}
+
+paths.category.installation:
+  en: Installation
+paths.category.internal_data:
+  en: Internal Data
+paths.category.external_storage:
+  en: External Storage
+paths.category.runtime:
+  en: Runtime
+paths.category.system:
+  en: System
+paths.apk:
+  en: APK
+paths.split_apk:
+  en: Split APK %{index}
+paths.code_path:
+  en: Code Path
+paths.native_libraries:
+  en: Native Libraries
+paths.oat_directory:
+  en: OAT Directory
+paths.resource_path:
+  en: Resource Path
+paths.native_library_dir:
+  en: Native Library Dir
+paths.data_directory:
+  en: Data Directory
+paths.shared_preferences:
+  en: Shared Preferences
+paths.databases:
+  en: Databases
+paths.cache:
+  en: Cache
+paths.code_cache:
+  en: Code Cache
+paths.files:
+  en: Files
+paths.data_symlink:
+  en: Data (symlink)
+paths.external_data:
+  en: External Data
+paths.external_files:
+  en: External Files
+paths.external_cache:
+  en: External Cache
+paths.external_media:
+  en: External Media
+paths.obb:
+  en: OBB Files
+paths.profile_current:
+  en: Profile (Current)
+paths.profile_reference:
+  en: Profile (Reference)
+paths.odex:
+  en: Compiled DEX (ODEX)
+paths.vdex:
+  en: Verified DEX (VDEX)
+paths.package_registry:
+  en: Package Registry
+paths.component_restrictions:
+  en: Component Restrictions
+paths.loading:
+  en: Loading paths…
+paths.none:
+  en: No paths found
+paths.copied:
+  en: Copied %{path}
+
+action.open:
+  en: Open
+action.force_stop:
+  en: Force Stop
+action.restart:
+  en: Restart
+action.clear_data:
+  en: Clear Data
+action.uninstall:
+  en: Uninstall
+action.copy:
+  en: Copy
+action.app_info:
+  en: App Info
+action.play_store:
+  en: Play Store
+action.enable:
+  en: Enable
+action.disable:
+  en: Disable
+action.grant_all:
+  en: Grant All
+action.revoke_all:
+  en: Revoke All
+action.manage_permissions:
+  en: Manage Permissions
+action.pin:
+  en: Pin
+action.unpin:
+  en: Unpin
+action.more:
+  en: More
+action.cancel:
+  en: Cancel
+action.running:
+  en: "%{action}…"
+action.failed:
+  en: "%{action} failed"
+action.complete:
+  en: "%{action} complete"
+action.copied_package:
+  en: Copied %{package}
+action.confirm_uninstall:
+  en: uninstall %{package}
+action.confirm_clear_data:
+  en: clear all data for %{package}
+action.confirm_body:
+  en: This will %{verb}. This cannot be undone.
+action.granting:
+  en: Granting permissions
+action.revoking:
+  en: Revoking permissions
+action.grant_summary:
+  en: Grant %{total} requested permissions for %{package}
+action.revoke_summary:
+  en: Revoke %{total} requested permissions for %{package}
+action.failed_so_far:
+  en: "%{count} failed so far"
+action.no_requested_grant:
+  en: No requested permissions to grant
+action.no_requested_revoke:
+  en: No requested permissions to revoke
+action.granted_all:
+  en: Granted all %{total} permissions for %{package}
+action.revoked_all:
+  en: Revoked all %{total} permissions for %{package}
+action.some_failed:
+  en: "%{errors} of %{total} permissions failed"
+
+debug.copy:
+  en: Copy
+debug.not_checked:
+  en: Not checked
+debug.checking:
+  en: Checking…
+debug.adb_path:
+  en: adb path
+debug.adb_version:
+  en: adb version
+debug.device:
+  en: device
+debug.title:
+  en: Debug
+debug.adb_not_found:
+  en: adb not found at %{path}
+debug.downloading:
+  en: Downloading adb
+debug.download_failed:
+  en: Download failed
+
+quick.back:
+  en: Back
+quick.home:
+  en: Home
+quick.recent:
+  en: Recent
+quick.volume_up:
+  en: Volume Up
+quick.volume_down:
+  en: Volume Down
+quick.play:
+  en: Play
+quick.pause:
+  en: Pause
+quick.mute:
+  en: Mute
+quick.settings:
+  en: Settings
+quick.lock:
+  en: Lock
+quick.power:
+  en: Power
+quick.screenshot:
+  en: Screenshot
+quick.quick_settings:
+  en: Quick Settings
+quick.notifications:
+  en: Notifications
+quick.collapse:
+  en: Collapse
+quick.developer:
+  en: Developer
+quick.tap_options:
+  en: Tap options
+quick.show_tap:
+  en: Show tap dot
+quick.hide_tap:
+  en: Hide tap dot

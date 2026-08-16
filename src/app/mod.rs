@@ -1,4 +1,6 @@
 use std::cell::Cell;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -134,6 +136,9 @@ pub struct Hakata {
     pub(crate) packages_device: Option<SharedString>,
     pub(crate) packages_error: Option<String>,
     pub(crate) packages_refresh_epoch: usize,
+    pub(crate) app_icons: HashMap<SharedString, HashMap<SharedString, PathBuf>>,
+    pub(crate) app_icons_epoch: usize,
+    pub(crate) app_icons_fetching: bool,
     pub(crate) selected_package: Option<SharedString>,
     pub(crate) selected_apps_tab: apps::AppsTab,
     pub(crate) apps_title_focus: FocusHandle,
@@ -216,6 +221,9 @@ impl Hakata {
                 packages_device: None,
                 packages_error: None,
                 packages_refresh_epoch: 0,
+                app_icons: HashMap::new(),
+                app_icons_epoch: 0,
+                app_icons_fetching: false,
                 selected_package: None,
                 selected_apps_tab: apps::AppsTab::Overview,
                 apps_title_focus: cx.focus_handle(),

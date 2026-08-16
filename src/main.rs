@@ -5,6 +5,7 @@ use gpui::{
 
 mod adb;
 mod app;
+mod app_icons;
 mod assets;
 mod emulator;
 mod input;

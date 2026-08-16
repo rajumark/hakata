@@ -10,7 +10,7 @@ use crate::theme::Theme;
 
 use super::{Hakata, icon};
 
-pub(crate) const QUICK_PANEL_WIDTH: f32 = 42.0;
+pub(crate) const QUICK_PANEL_WIDTH: f32 = 50.0;
 const CHIP_SIZE: f32 = 26.0;
 const CHIP_ICON_SIZE: f32 = 16.0;
 const GROUP_GAP: f32 = 8.0;
@@ -74,9 +74,11 @@ impl Hakata {
             .w(px(QUICK_PANEL_WIDTH))
             .h_full()
             .flex_none()
+            .bg(theme.surface)
+            .border_l_1()
+            .border_color(theme.sidebar_border)
             .flex()
             .justify_center()
-            .pr(px(8.0))
             .child(
                 div()
                     .id("quick-panel-scroll")

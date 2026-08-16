@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use gpui::{
     actions, Animation, AnimationExt, AnyElement, App, ClipboardItem, Context,
-    InteractiveElement, IntoElement, KeyBinding, KeyDownEvent, MouseButton, ParentElement,
-    SharedString, Styled, Window, div, px, prelude::*,
+    InteractiveElement, IntoElement, KeyBinding, KeyDownEvent, MouseButton, ObjectFit,
+    ParentElement, SharedString, Styled, Window, div, img, px, prelude::*,
 };
 
 use crate::theme::Theme;
@@ -51,6 +51,7 @@ impl Hakata {
             self.packages_loaded = false;
             self.packages_device = None;
             self.packages_error = None;
+            self.app_icons.clear();
             cx.notify();
             return;
         };
@@ -58,6 +59,7 @@ impl Hakata {
             && self.packages_device.as_deref() == Some(serial.as_str())
             && self.packages_loaded
         {
+            self.fetch_app_icons(cx);
             return;
         }
         let adb_path = crate::adb::adb_path();
@@ -116,6 +118,65 @@ impl Hakata {
                     Err(error) => {
                         this.packages.clear();
                         this.packages_error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+                this.fetch_app_icons(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Fetch PNG icons for the selected device's packages on the background
+    /// executor, storing the local paths under `<device-id> -> <package>`.
+    /// Packages already cached in memory are skipped; the on-disk cache under
+    /// the app-support dir makes repeat fetches cheap. A generation counter
+    /// drops results from a superseded run (device switched mid-flight).
+    pub(crate) fn fetch_app_icons(&mut self, cx: &mut Context<Self>) {
+        if self.app_icons_fetching {
+            return;
+        }
+        let Some(serial) = self.selected_device.clone() else {
+            self.app_icons.clear();
+            cx.notify();
+            return;
+        };
+        if !crate::adb::is_installed() || self.packages.is_empty() {
+            return;
+        }
+        let uncached: Vec<String> = self
+            .packages
+            .iter()
+            .filter(|package| {
+                !self
+                    .app_icons
+                    .get(serial.as_str())
+                    .is_some_and(|icons| icons.contains_key(package.as_str()))
+            })
+            .map(|package| package.to_string())
+            .collect();
+        if uncached.is_empty() {
+            return;
+        }
+        self.app_icons_epoch += 1;
+        let epoch = self.app_icons_epoch;
+        let serial_for_spawn = serial.clone();
+        self.app_icons_fetching = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::app_icons::fetch_icons(&serial_for_spawn, &uncached) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.app_icons_fetching = false;
+                if this.app_icons_epoch != epoch {
+                    return;
+                }
+                if let Ok(found) = result {
+                    let icons = this.app_icons.entry(serial.clone()).or_default();
+                    for (package, path) in found {
+                        icons.insert(SharedString::from(package), path);
                     }
                 }
                 cx.notify();
@@ -703,8 +764,13 @@ impl Hakata {
             );
         }
 
-        shell = shell.child(refresh);
-        shell.into_any_element()
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(shell)
+            .child(refresh)
+            .into_any_element()
     }
 
     fn render_apps_list(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -785,23 +851,7 @@ impl Hakata {
                     }
                 }),
             )
-            .child(
-                div()
-                    .size(px(14.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon(
-                        "icons/apps.svg",
-                        12.0,
-                        if selected {
-                            theme.text_secondary
-                        } else {
-                            theme.text_ghost
-                        },
-                    )),
-            )
+            .child(self.render_package_icon(&package, selected, cx))
             .child(
                 div()
                     .flex_1()
@@ -818,6 +868,66 @@ impl Hakata {
             .when(pinned, |element| {
                 element.child(icon("icons/pin.svg", 10.0, theme.text_ghost))
             })
+            .into_any_element()
+    }
+
+    /// The row's leading glyph: the cached app icon when available, otherwise
+    /// the generic apps glyph.
+    fn render_package_icon(
+        &self,
+        package: &SharedString,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let path = self
+            .selected_device
+            .as_ref()
+            .and_then(|serial| self.app_icons.get(serial.as_str()))
+            .and_then(|icons| icons.get(package.as_str()))
+            .cloned();
+        let Some(path) = path else {
+            return div()
+                .size(px(16.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon(
+                    "icons/apps.svg",
+                    12.0,
+                    if selected {
+                        theme.text_secondary
+                    } else {
+                        theme.text_ghost
+                    },
+                ))
+                .into_any_element();
+        };
+        let fallback_color = if selected {
+            theme.text_secondary
+        } else {
+            theme.text_ghost
+        };
+        div()
+            .size(px(16.0))
+            .flex_none()
+            .rounded(px(4.0))
+            .overflow_hidden()
+            .child(
+                img(path)
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .with_fallback(move || {
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon("icons/apps.svg", 12.0, fallback_color))
+                            .into_any_element()
+                    }),
+            )
             .into_any_element()
     }
 
