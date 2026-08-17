@@ -17,8 +17,9 @@ zip_name="Hakata-${version}-${target_triple}.zip"
 cargo build --locked --release --bin hakata
 
 rm -rf "$bundle"
-mkdir -p "$contents/MacOS"
+mkdir -p "$contents/MacOS" "$contents/Resources"
 cp resources/macos/Info.plist "$contents/Info.plist"
+cp resources/icon/AppIcon.icns "$contents/Resources/AppIcon.icns"
 cp "$target_dir/release/hakata" "$contents/MacOS/Hakata"
 plutil -replace CFBundleVersion -string "$version" "$contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$version" "$contents/Info.plist"

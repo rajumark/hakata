@@ -42,6 +42,10 @@ pub(crate) const APPS_PANEL_MAX_FRACTION: f32 = 0.60;
 /// How often the connected-device list is refreshed.
 pub(crate) const DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
+/// How often the Apps page re-queries the package list in the background.
+/// Only runs while the Apps page is visible, and only re-renders on change.
+pub(crate) const APPS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
 /// The four sidebar menus. Each shows a page in the main area.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MenuPage {
@@ -138,6 +142,8 @@ pub struct Hakata {
     pub(crate) packages_device: Option<SharedString>,
     pub(crate) packages_error: Option<String>,
     pub(crate) packages_refresh_epoch: usize,
+    pub(crate) packages_polling: bool,
+    pub(crate) apps_refresh_started: bool,
     pub(crate) app_icons: HashMap<SharedString, HashMap<SharedString, PathBuf>>,
     pub(crate) app_icons_epoch: usize,
     pub(crate) app_icons_fetching: bool,
@@ -228,6 +234,8 @@ impl Hakata {
                 packages_device: None,
                 packages_error: None,
                 packages_refresh_epoch: 0,
+                packages_polling: false,
+                apps_refresh_started: false,
                 app_icons: HashMap::new(),
                 app_icons_epoch: 0,
                 app_icons_fetching: false,
@@ -307,7 +315,8 @@ impl Hakata {
             self.check_adb_version(cx);
         }
         if page == MenuPage::Apps {
-            self.refresh_packages(false, cx);
+            self.ensure_apps_refresh_loop(cx);
+            self.poll_packages(cx);
             self.fetch_package_dump(false, cx);
             window.focus(&self.apps_search.read(cx).focus(), cx);
         }

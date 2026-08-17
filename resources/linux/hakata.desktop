@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Hakata
+Comment=A tiny GPUI desktop app for inspecting Android devices
+Exec=hakata
+Icon=hakata
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true
+StartupWMClass=hakata

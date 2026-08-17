@@ -17,6 +17,11 @@ cargo build --locked --release --bin hakata
 
 package_dir="$staging/$package"
 install -Dm755 "$target_dir/release/hakata" "$package_dir/bin/hakata"
+install -Dm644 resources/linux/hakata.desktop \
+  "$package_dir/share/applications/hakata.desktop"
+for icon in resources/icon/hicolor/*/apps/hakata.png; do
+  install -Dm644 "$icon" "$package_dir/share/icons/${icon#resources/icon/}"
+done
 install -Dm644 README.md "$package_dir/share/doc/hakata/README.md"
 
 mkdir -p "$(dirname "$archive")"

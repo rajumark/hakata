@@ -297,72 +297,88 @@ impl Hakata {
             Self::close_device_menu,
             232.0,
             |theme, cx| {
+                let mut menu = div();
                 if self.devices.is_empty() {
-                    return div()
-                        .child(
-                            div()
-                                .mx(px(4.0))
-                                .px(px(8.0))
-                                .min_h(px(26.0))
-                                .rounded(px(6.0))
-                                .flex()
-                                .items_center()
-                                .text_size(px(11.5))
-                                .text_color(theme.text_tertiary)
-                                .child(tr_cow!("device.no_devices")),
-                        )
-                        .child(
-                            div()
-                                .id("device-menu-emulators")
-                                .mx(px(4.0))
-                                .px(px(8.0))
-                                .min_h(px(26.0))
-                                .rounded(px(6.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .cursor_default()
-                                .hover(|element| element.bg(theme.overlay))
-                                .child(icon(
-                                    "icons/terminal-square.svg",
-                                    12.0,
-                                    theme.text_secondary,
-                                ))
-                                .child(
+                    menu = menu.child(
+                        div()
+                            .mx(px(4.0))
+                            .px(px(8.0))
+                            .min_h(px(26.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .text_size(px(11.5))
+                            .text_color(theme.text_tertiary)
+                            .child(tr_cow!("device.no_devices")),
+                    );
+                } else {
+                    for device in &self.devices {
+                        let serial = device.serial.clone();
+                        let ready = device.state == "device";
+                        let selected = self.selected_device.as_deref() == Some(serial.as_str());
+                        let row_color = if !ready {
+                            theme.text_ghost
+                        } else if selected {
+                            theme.text
+                        } else {
+                            theme.text_secondary
+                        };
+                        let row = div()
+                            .id(SharedString::from(format!("device-menu-{}", serial)))
+                            .mx(px(4.0))
+                            .px(px(8.0))
+                            .min_h(px(26.0))
+                            .rounded(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .cursor_default()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(11.5))
+                                    .text_color(row_color)
+                                    .child(SharedString::from(serial.clone())),
+                            )
+                            .when(selected, |element| {
+                                element
+                                    .child(icon("icons/check.svg", 11.0, theme.text_tertiary))
+                            })
+                            .when(!ready, |element| {
+                                element.child(
                                     div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .text_size(px(11.5))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr_cow!("device.emulators")),
+                                        .flex_none()
+                                        .text_size(px(10.0))
+                                        .text_color(theme.text_ghost)
+                                        .child(SharedString::from(device.state.clone())),
                                 )
-                                .child(icon(
-                                    "icons/chevron-right.svg",
-                                    11.0,
-                                    theme.text_tertiary,
-                                ))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _, _, cx| {
-                                        this.toggle_emulator_dialog(cx);
-                                    }),
-                                ),
-                        );
+                            })
+                            .when(ready, |element| {
+                                element
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener({
+                                            let serial = serial.clone();
+                                            move |this, _, _, cx| this.select_device(&serial, cx)
+                                        }),
+                                    )
+                            });
+                        menu = menu.child(row);
+                    }
+                    menu = menu.child(
+                        div()
+                            .mx(px(8.0))
+                            .my(px(2.0))
+                            .h(px(1.0))
+                            .bg(theme.border),
+                    );
                 }
-                let mut card = div();
-                for device in &self.devices {
-                    let serial = device.serial.clone();
-                    let ready = device.state == "device";
-                    let selected = self.selected_device.as_deref() == Some(serial.as_str());
-                    let row_color = if !ready {
-                        theme.text_ghost
-                    } else if selected {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    };
-                    let row = div()
-                        .id(SharedString::from(format!("device-menu-{}", serial)))
+                menu = menu.child(
+                    div()
+                        .id("device-menu-emulators")
                         .mx(px(4.0))
                         .px(px(8.0))
                         .min_h(px(26.0))
@@ -371,41 +387,33 @@ impl Hakata {
                         .items_center()
                         .gap(px(8.0))
                         .cursor_default()
+                        .hover(|element| element.bg(theme.overlay))
+                        .child(icon(
+                            "icons/terminal-square.svg",
+                            12.0,
+                            theme.text_secondary,
+                        ))
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .truncate()
                                 .text_size(px(11.5))
-                                .text_color(row_color)
-                                .child(SharedString::from(serial.clone())),
+                                .text_color(theme.text_secondary)
+                                .child(tr_cow!("device.emulators")),
                         )
-                        .when(selected, |element| {
-                            element.child(icon("icons/check.svg", 11.0, theme.text_tertiary))
-                        })
-                        .when(!ready, |element| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .text_size(px(10.0))
-                                    .text_color(theme.text_ghost)
-                                    .child(SharedString::from(device.state.clone())),
-                            )
-                        })
-                        .when(ready, |element| {
-                            element
-                                .hover(|element| element.bg(theme.overlay))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener({
-                                        let serial = serial.clone();
-                                        move |this, _, _, cx| this.select_device(&serial, cx)
-                                    }),
-                                )
-                        });
-                    card = card.child(row);
-                }
-                card
+                        .child(icon(
+                            "icons/chevron-right.svg",
+                            11.0,
+                            theme.text_tertiary,
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.toggle_emulator_dialog(cx);
+                            }),
+                        ),
+                );
+                menu
             },
         );
         trigger.child(surface).into_any_element()

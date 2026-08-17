@@ -130,6 +130,132 @@ impl Hakata {
         .detach();
     }
 
+    /// Start the once-only 5-second background loop that silently re-queries
+    /// the package list while the Apps page is visible. The loop itself keeps
+    /// running, but it does no work (and never touches the UI) while another
+    /// page is selected, so leaving the Apps page effectively pauses it and
+    /// coming back resumes it — the immediate poll on page entry covers the
+    /// gap.
+    pub(crate) fn ensure_apps_refresh_loop(&mut self, cx: &mut Context<Self>) {
+        if self.apps_refresh_started {
+            return;
+        }
+        self.apps_refresh_started = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(super::APPS_REFRESH_INTERVAL)
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.selected_page == super::MenuPage::Apps
+                        && this.selected_device.is_some()
+                    {
+                        this.poll_packages(cx);
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Silently re-query `pm list packages` on the background executor and
+    /// only re-render when the result actually differs from what's on screen.
+    /// The loading state is shown only while nothing is cached yet, so a quiet
+    /// poll never flickers. A generation counter drops a superseded result.
+    pub(crate) fn poll_packages(&mut self, cx: &mut Context<Self>) {
+        if self.packages_polling {
+            return;
+        }
+        let Some(serial) = self.selected_device.clone() else {
+            self.packages.clear();
+            self.packages_loading = false;
+            self.packages_loaded = false;
+            self.packages_device = None;
+            self.packages_error = None;
+            self.app_icons.clear();
+            cx.notify();
+            return;
+        };
+        let adb_path = crate::adb::adb_path();
+        if !crate::adb::is_installed() {
+            self.packages.clear();
+            self.packages_loading = false;
+            self.packages_loaded = false;
+            self.packages_device = Some(serial);
+            self.packages_error = None;
+            self.app_icons.clear();
+            cx.notify();
+            return;
+        }
+        let show_loading =
+            !self.packages_loaded || self.packages_device.as_deref() != Some(serial.as_str());
+        if show_loading {
+            self.packages_loading = true;
+            cx.notify();
+        }
+        self.packages_polling = true;
+        self.packages_refresh_epoch += 1;
+        let epoch = self.packages_refresh_epoch;
+        let serial_for_spawn = serial.clone();
+        let filter = self.apps_filter;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    std::process::Command::new(&adb_path)
+                        .arg("-s")
+                        .arg(serial_for_spawn.as_str())
+                        .arg("shell")
+                        .arg("pm")
+                        .arg("list")
+                        .arg("packages")
+                        .args(filter.adb_flag())
+                        .output()
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.packages_polling = false;
+                if this.packages_refresh_epoch != epoch {
+                    return;
+                }
+                let mut next_packages = Vec::new();
+                let mut next_error = None;
+                match result {
+                    Ok(output) if output.status.success() => {
+                        next_packages = crate::adb::parse_packages(
+                            &String::from_utf8_lossy(&output.stdout),
+                        )
+                        .into_iter()
+                        .map(SharedString::from)
+                        .collect();
+                    }
+                    Ok(output) => {
+                        next_error =
+                            Some(String::from_utf8_lossy(&output.stderr).trim().to_string());
+                    }
+                    Err(error) => {
+                        next_error = Some(error.to_string());
+                    }
+                }
+                let was_loading = this.packages_loading;
+                let device_changed = this.packages_device.as_deref() != Some(serial.as_str());
+                let list_changed =
+                    this.packages != next_packages || this.packages_error != next_error;
+                let changed = was_loading || device_changed || list_changed;
+                this.packages_loading = false;
+                this.packages_loaded = true;
+                this.packages_device = Some(serial);
+                this.packages_error = next_error;
+                if changed {
+                    this.packages = next_packages;
+                    cx.notify();
+                    this.fetch_app_icons(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Fetch PNG icons for the selected device's packages on the background
     /// executor, storing the local paths under `<device-id> -> <package>`.
     /// Packages already cached in memory are skipped; the on-disk cache under
@@ -686,35 +812,10 @@ impl Hakata {
         let focused = self.apps_search.read(cx).is_visually_focused(window);
         let has_content = !self.apps_search.read(cx).is_empty();
 
-        let refresh = div()
-            .id("apps-refresh")
-            .tab_index(0)
-            .focus_visible(|style| style.bg(theme.overlay))
-            .size(px(18.0))
-            .flex_none()
-            .rounded(px(5.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_default()
-            .opacity(if self.packages_loading { 0.6 } else { 1.0 })
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(icon("icons/refresh-cw.svg", 12.0, theme.text_ghost))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.refresh_packages(true, cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.refresh_packages(true, cx);
-                    cx.stop_propagation();
-                }
-            }));
-
         let shell = div()
             .id("apps-search")
             .h(px(28.0))
-            .flex_none()
+            .flex_1()
             .px(px(8.0))
             .rounded(px(6.0))
             .border_1()
@@ -776,7 +877,6 @@ impl Hakata {
             .items_center()
             .gap(px(6.0))
             .child(shell)
-            .child(refresh)
             .child(self.render_apps_more_trigger(&theme, cx));
 
         if self.apps_more_menu_open
